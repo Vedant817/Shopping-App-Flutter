@@ -32,5 +32,3 @@ final products = [
     'sizes': [8, 9, 10],
   },
 ];
-
-final cart = [];

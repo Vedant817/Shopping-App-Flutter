@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:shopping_app/cart-provider.dart';
 import 'package:shopping_app/home.dart';
 
 void main() {
@@ -12,8 +13,8 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Provider( /// Task of this provider is to store data.
-      create: (context) => 'Hello World',
+    return ChangeNotifierProvider( /// Task of this provider is to store data.
+      create: (context) => CartProvider(),
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
         title: 'Shopping App',

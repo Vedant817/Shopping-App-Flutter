@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/material.dart%20';
 import 'package:provider/provider.dart';
-import 'global_variables.dart';
+import 'package:shopping_app/cart-provider.dart';
 
 class CartPage extends StatelessWidget {
   const CartPage({super.key});
@@ -9,6 +9,7 @@ class CartPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // print(Provider.of<String>(context)); // This will give the context of the nearest widget.
+    final cart = Provider.of<CartProvider>(context).cart;
     return Scaffold(
         appBar: AppBar(
           title: const Text('Cart'),
@@ -22,13 +23,50 @@ class CartPage extends StatelessWidget {
                   cartItem['title'].toString(),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
-                subtitle: Text(cartItem['sizes'].toString()),
+                subtitle: Text('Size: ${cartItem['size'].toString()}'),
                 leading: CircleAvatar(
                   backgroundImage: AssetImage(cartItem['imageUrl'] as String),
                   radius: 30,
                 ),
                 trailing: IconButton(
-                  onPressed: () {},
+                  onPressed: () {
+                    showDialog(
+                      barrierDismissible: false,
+                        context: context,
+                        builder: (context) {
+                          return AlertDialog(
+                            title: Text(
+                              'Delete Product',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            content: const Text(
+                                'Are you sure you want to remove the product from the cart?'),
+                            actions: [
+                              TextButton(
+                                  onPressed: () {
+                                    Navigator.of(context).pop();
+                                  },
+                                  child: const Text(
+                                    'No',
+                                    style: TextStyle(
+                                        color: Colors.blue,
+                                        fontWeight: FontWeight.bold),
+                                  )),
+                              TextButton(
+                                  onPressed: () {
+                                    Provider.of<CartProvider>(context, listen: false).removeProduct(cartItem);
+                                    Navigator.of(context).pop();
+                                  },
+                                  child: const Text(
+                                    'Yes',
+                                    style: TextStyle(
+                                        color: Colors.red,
+                                        fontWeight: FontWeight.bold),
+                                  ))
+                            ],
+                          );
+                        });
+                  },
                   icon: const Icon(
                     Icons.delete,
                     color: Colors.red,
