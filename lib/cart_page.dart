@@ -9,10 +9,11 @@ class CartPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // print(Provider.of<String>(context)); // This will give the context of the nearest widget.
-    final cart = Provider.of<CartProvider>(context).cart;
+    // final cart = Provider.of<CartProvider>(context).cart;
+    final cart = context.watch<CartProvider>().cart;
     return Scaffold(
         appBar: AppBar(
-          title: const Text('Cart'),
+          title: Text('Cart', style: Theme.of(context).textTheme.titleLarge,),
         ),
         body: ListView.builder(
             itemCount: cart.length,
@@ -54,7 +55,8 @@ class CartPage extends StatelessWidget {
                                   )),
                               TextButton(
                                   onPressed: () {
-                                    Provider.of<CartProvider>(context, listen: false).removeProduct(cartItem);
+                                    // Provider.of<CartProvider>(context, listen: false).removeProduct(cartItem);
+                                    context.read<CartProvider>().removeProduct(cartItem);
                                     Navigator.of(context).pop();
                                   },
                                   child: const Text(
