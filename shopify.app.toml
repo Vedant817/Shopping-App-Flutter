@@ -1,0 +1,28 @@
+client_id = "c93ef7b168e85aebd73bee13888bb67e"
+name = "Threadline"
+application_url = "https://threadline-api-19to.onrender.com"
+embedded = false
+
+[access_scopes]
+scopes = "read_products,read_customers,read_orders"
+
+[access.admin]
+direct_api_mode = "offline"
+
+[auth]
+redirect_urls = ["https://threadline-api-19to.onrender.com/v1/auth/shopify/callback"]
+
+[webhooks]
+api_version = "2026-07"
+
+[[webhooks.subscriptions]]
+topics = [
+  "app/uninstalled",
+  "products/create",
+  "products/update",
+  "products/delete",
+]
+uri = "/v1/webhooks/shopify"
+
+[build]
+automatically_update_urls_on_dev = false
