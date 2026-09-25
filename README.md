@@ -1,16 +1,224 @@
-# shopping_app
+# Threadline
 
-A new Flutter project.
+Threadline is a Flutter commerce-intelligence client backed by the TypeScript service in `service/`. It provides workspace-scoped overview, catalog, customer, order, synchronization, Shopify installation, and member-management views.
 
-## Getting Started
+The repository contains no bundled commerce records, demo tenants, fallback metrics, simulated health state, or Shopify/Supabase secrets. A build without the required runtime configuration opens a setup screen instead of showing fabricated data.
 
-This project is a starting point for a Flutter application.
+## Architecture
 
-A few resources to get you started if this is your first Flutter project:
+```text
+Flutter client
+  ├─ Supabase Email OTP and secure session storage
+  ├─ Authenticated HTTPS API client
+  └─ threadline:// Shopify install return
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+Render web service (service/src/http)
+  ├─ Supabase JWT verification and tenant authorization
+  ├─ Shopify OAuth and GraphQL ingestion
+  ├─ PostgreSQL-backed queue and analytics queries
+  └─ REST/webhook API
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Render worker (service/src/worker)
+  └─ Durable Shopify sync, webhook, and compliance processing
+
+Supabase/PostgreSQL
+  ├─ Auth users and JWT issuer/JWKS
+  ├─ Threadline schema and RLS policies
+  └─ Shopify installations, source data, jobs, and audit events
+```
+
+## Prerequisites
+
+- Node.js `24` or newer.
+- Flutter `3.38.1` or newer and Dart `3.10` or newer.
+- A Supabase project with Email OTP enabled.
+- A Shopify Partner account, public app, and development store.
+- A Render account and a reachable HTTPS service hostname.
+- Android SDK for Android builds; macOS with Xcode and signing for iOS builds.
+- Docker Desktop if running the database/RLS integration check locally.
+
+## 1. Supabase
+
+1. Create a Supabase project.
+2. In **Authentication → Providers**, enable Email. Keep the confirmation/OTP email template usable for the intended users.
+3. Copy the project URL and a publishable key. Use the publishable key in Flutter; never use a Supabase secret or service-role key in the client.
+4. Set the service JWT values to:
+   - `SUPABASE_JWT_ISSUER=https://<project-ref>.supabase.co/auth/v1`
+   - `SUPABASE_JWKS_URL=https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json`
+   - `SUPABASE_JWT_AUDIENCE=authenticated`
+5. Use one migration history for the database. The canonical runtime history is `service/drizzle/`; `supabase/migrations/` is a checked mirror. Do not apply both histories independently to the same database. For the Render deployment, let the API pre-deploy command apply Drizzle migrations.
+
+For a local/service-owned migration run:
+
+```bash
+cd service
+npm ci
+$env:DATABASE_URL="postgresql://..."
+npm run db:migrate
+```
+
+The Render blueprint runs the compiled equivalent, `npm run db:migrate:runtime`, before the web service starts. The migration mirror check is available with `npm run migrations:sync` and `npm run migrations:check`.
+
+## 2. Shopify Partner app
+
+Create a public app in the Shopify Partner dashboard and a development store for verification.
+
+Configure the app with:
+
+- The API version supported by the service, currently configured as `2026-01` in `render.yaml`.
+- The scopes needed for the queried products, variants, customers, orders, refunds, carts, and checkouts. The service does not silently broaden scopes; review the current Shopify Partner requirements before publishing.
+- The OAuth callback URL:
+
+```text
+https://<render-service-host>/v1/auth/shopify/callback
+```
+
+- The post-install return URL:
+
+```text
+threadline://shopify/install
+```
+
+- The webhook endpoint:
+
+```text
+https://<render-service-host>/v1/webhooks/shopify
+```
+
+Register the webhook topics accepted by the service, including the relevant product, customer, order, refund, cart, checkout, uninstall, privacy, and event topics. The exact enabled set should match the resources the app is intended to ingest. Shopify protected-customer-data approval and the production privacy/support details are required before handling real customer data.
+
+The first successful Shopify install creates the workspace and assigns the installing Supabase user as owner. Additional members must already have a Supabase account; the member page adds an existing user by user ID.
+
+## 3. Render service
+
+1. Create a Render Blueprint from `render.yaml`, or create the web and worker services manually.
+2. Set the web service health-check path to `/health/ready`.
+3. Use the generated web-service hostname for `APP_BASE_URL`, the OAuth callback, and the Flutter `API_BASE_URL` after deployment.
+4. Set the same database, Supabase JWT, Shopify, and CORS values on both services. Secrets marked `sync: false` must be entered in Render; do not put them in `render.yaml`.
+5. Deploy the API first, confirm `/health/live` and `/health/ready`, then deploy the worker.
+
+The service refuses an invalid environment, a non-HTTPS OAuth callback, a database URL that is not PostgreSQL, a token-encryption key that is not exactly 32 decoded bytes, and production database SSL set to false.
+
+Generate a token-encryption key locally and store it in the Render secret manager only:
+
+```powershell
+$bytes = New-Object byte[] 32
+[Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+[Convert]::ToBase64String($bytes)
+```
+
+### Service environment variables
+
+The complete names are listed in `.env.example`. The important values are:
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Supabase PostgreSQL connection string |
+| `DATABASE_SSL` | `true` in production |
+| `SUPABASE_JWT_ISSUER` | Supabase Auth issuer |
+| `SUPABASE_JWKS_URL` | Supabase JWKS endpoint |
+| `SUPABASE_JWT_AUDIENCE` | Usually `authenticated` |
+| `SHOPIFY_API_KEY` | Shopify app client ID |
+| `SHOPIFY_API_SECRET` | Shopify app client secret |
+| `SHOPIFY_WEBHOOK_SECRET` | Secret used to verify Shopify webhook HMACs |
+| `SHOPIFY_API_VERSION` | Pinned Shopify Admin GraphQL version |
+| `SHOPIFY_TOKEN_ENCRYPTION_KEY` | Base64-encoded 32-byte key for offline tokens |
+| `SHOPIFY_SCOPES` | Space- or comma-separated approved scopes |
+| `APP_BASE_URL` | Public HTTPS API base URL |
+| `SHOPIFY_OAUTH_CALLBACK_URL` | Exact API callback URL |
+| `SHOPIFY_MOBILE_POST_INSTALL_RETURN_URL` | `threadline://shopify/install` |
+| `CORS_ORIGIN` | Comma-separated allowed HTTP(S) origins |
+
+`PORT`, `HOST`, queue/poll settings, retry settings, log level, and proxy trust are also validated. Keep `SHOPIFY_API_SECRET`, `SHOPIFY_WEBHOOK_SECRET`, `SHOPIFY_TOKEN_ENCRYPTION_KEY`, and the database URL out of source control and client builds.
+
+## 4. Flutter runtime configuration
+
+Every run that starts the authenticated client needs all four values:
+
+| Dart define | Requirement |
+|---|---|
+| `API_BASE_URL` | HTTPS service base URL without credentials, query, or fragment |
+| `SUPABASE_URL` | HTTPS Supabase project URL |
+| `SUPABASE_PUBLISHABLE_KEY` | Supabase publishable key or legacy anon key; never a secret key |
+| `SHOPIFY_MOBILE_RETURN_URL` | Exactly `threadline://shopify/install` |
+
+Example:
+
+```bash
+flutter run \
+  --dart-define=API_BASE_URL=https://<render-service-host> \
+  --dart-define=SUPABASE_URL=https://<project-ref>.supabase.co \
+  --dart-define=SUPABASE_PUBLISHABLE_KEY=<publishable-key> \
+  --dart-define=SHOPIFY_MOBILE_RETURN_URL=threadline://shopify/install
+```
+
+The service must have the same mobile return URL in `SHOPIFY_MOBILE_POST_INSTALL_RETURN_URL`. Missing or invalid values produce a setup-required screen listing the missing defines.
+
+## Authentication and authorization
+
+- Supabase Email OTP is the only client sign-in path in this build.
+- Supabase access tokens are stored with platform secure storage and sent as Bearer credentials.
+- The service validates Supabase JWTs against JWKS and checks workspace membership on every tenant route.
+- Workspace roles and capabilities are server-authoritative. The client hides unauthorized actions, while the service remains the enforcement point.
+- Shopify offline tokens are encrypted at rest by the service and are never sent to Flutter.
+
+## Client behavior
+
+- Server workspaces are the only source of tenant selection.
+- Overview, catalog, customers, product/customer details, sync state, and members come from service DTOs.
+- Money and ratios use decimal values; currency comes from the workspace or source DTO.
+- Product and customer lists use server-side search and opaque cursor pagination.
+- Revenue trends are dense, workspace-local service values; the client does not fabricate missing days.
+- Ingestion polling continues through queued/running states until the service reports success or a terminal dead state.
+- Per-workspace ranges and successful in-memory snapshots are retained across selection and refresh.
+- Stale workspace, search, pagination, detail, onboarding, and polling responses cannot replace newer state.
+
+## Platform identity
+
+- Android application ID: `com.threadline.app`.
+- iOS/macOS bundle ID: `com.threadline.app`.
+- Mobile/macOS OAuth scheme: `threadline://`.
+- Shopify return path: `threadline://shopify/install`.
+- Android activity: `android/app/src/main/kotlin/com/threadline/app/MainActivity.kt`.
+
+Android release signing is not delegated to the debug key. A release build fails unless `android/key.properties` provides `storeFile`, `storePassword`, `keyAlias`, and `keyPassword`. Keep that file and its keystore outside source control. iOS release signing requires the Apple team, bundle identifier, keychain entitlements, and provisioning profiles on macOS.
+
+## Validate locally
+
+From the repository root:
+
+```bash
+dart format --output=none --set-exit-if-changed lib test
+flutter analyze
+flutter test
+flutter build apk --debug
+flutter build web --release
+```
+
+From `service/`:
+
+```bash
+npm ci
+npm test
+npm run typecheck
+npm run build
+npm run migrations:check
+npm run test:docker
+```
+
+The test suite injects configuration, authentication, repositories, launchers, deep links, clocks, and polling delays. It covers setup validation, OTP/session transitions, onboarding, RFC 7807 errors, typed decimal DTOs, search and pagination, ranges, retry polling, stale tenant responses, detail isolation, member capabilities, dark mode, keyboard visibility, 320-pixel layouts, and large text.
+
+## Live verification checklist
+
+Do not treat local tests as proof that external integrations work. After credentials and infrastructure exist, verify in this order:
+
+1. `/health/live` and `/health/ready` on Render.
+2. Supabase Email OTP delivery, verification, session restoration, and sign-out.
+3. Shopify OAuth against the development store and exact mobile deep-link return.
+4. Product, customer, order, refund, cart, and checkout sync progress and terminal state.
+5. A signed Shopify webhook and canonical refetch.
+6. Owner/admin/member/viewer authorization and last-owner protection.
+7. App uninstall, privacy request, redaction, and shop redact handling.
+8. Release-signed Android artifact and, on macOS, an iOS archive.
+
+The repository has passed local Flutter, service, migration, and Android/web build checks. Live Shopify, Supabase email, Render, webhook, and store verification remain pending until those external resources are configured.
