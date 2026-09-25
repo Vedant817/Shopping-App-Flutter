@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1790325703561,
+      "tag": "0000_panoramic_amazoness",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790329902663,
+      "tag": "0001_remarkable_clea",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790332351765,
+      "tag": "0002_military_malcolm_colcord",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790340174862,
+      "tag": "0003_compliance_and_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790341945222,
+      "tag": "0004_role_constraint_snapshot",
+      "breakpoints": true
+    }
+  ]
+}
