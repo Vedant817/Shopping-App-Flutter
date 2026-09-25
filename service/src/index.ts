@@ -1,10 +1,13 @@
 import { loadConfig } from './config/env.js';
-import { createDatabase, closeDatabase } from './db/client.js';
+import { createDatabase, closeDatabase, readDatabaseCaCertificate } from './db/client.js';
 import { buildApp } from './http/server.js';
 
 const config = loadConfig();
-const database = createDatabase(config.databaseUrl, config.databaseSsl, config.nodeEnv);
+const database = createDatabase(config.databaseUrl, config.databaseSsl, config.nodeEnv, readDatabaseCaCertificate());
 const app = await buildApp({ config, db: database.db });
+if (config.databaseSsl && !readDatabaseCaCertificate()) {
+  app.log.warn('database TLS is encrypted but the server certificate is not verified; set DATABASE_CA_CERT_PATH to the Supabase root certificate to verify it');
+}
 
 let shuttingDown = false;
 const shutdown = async (signal: string): Promise<void> => {

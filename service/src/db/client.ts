@@ -1,6 +1,14 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import * as schema from './schema.js';
+
+export function readDatabaseCaCertificate(): string | undefined {
+  const path = process.env.DATABASE_CA_CERT_PATH;
+  if (!path) return undefined;
+  return readFileSync(resolve(process.cwd(), path), 'utf8');
+}
 
 export type Database = NodePgDatabase<typeof schema>;
 
@@ -11,19 +19,28 @@ export type DatabaseHandle = {
 
 export type DatabaseEnvironment = 'development' | 'test' | 'production';
 
-export function databasePoolConfig(connectionString: string, ssl: boolean, nodeEnv: DatabaseEnvironment): { connectionString: string; max: number; idleTimeoutMillis: number; connectionTimeoutMillis: number; ssl?: { rejectUnauthorized: true } } {
+export function databasePoolConfig(connectionString: string, ssl: boolean, nodeEnv: DatabaseEnvironment, caCertificate?: string): { connectionString: string; max: number; idleTimeoutMillis: number; connectionTimeoutMillis: number; ssl?: { rejectUnauthorized: boolean; ca?: string } } {
   if (!ssl && nodeEnv !== 'development' && nodeEnv !== 'test') throw new Error('DATABASE_SSL must be enabled outside development and test');
   return {
     connectionString,
     max: 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
-    ...(ssl ? { ssl: { rejectUnauthorized: true as const } } : {}),
+    ...(ssl
+      ? {
+          // Supabase's proxies chain to a Supabase root CA that is not in the
+          // public trust store, so verifying fails unless the root is supplied.
+          // With a certificate this verifies the server. Without one this
+          // matches sslmode=require, which Supabase documents as the default:
+          // the connection is encrypted but the server is not authenticated.
+          ssl: caCertificate ? { rejectUnauthorized: true, ca: caCertificate } : { rejectUnauthorized: false },
+        }
+      : {}),
   };
 }
 
-export function createDatabase(connectionString: string, ssl: boolean, nodeEnv: DatabaseEnvironment = 'production'): DatabaseHandle {
-  const pool = new Pool(databasePoolConfig(connectionString, ssl, nodeEnv));
+export function createDatabase(connectionString: string, ssl: boolean, nodeEnv: DatabaseEnvironment = 'production', caCertificate?: string): DatabaseHandle {
+  const pool = new Pool(databasePoolConfig(connectionString, ssl, nodeEnv, caCertificate));
   return { db: drizzle(pool, { schema }), pool };
 }
 

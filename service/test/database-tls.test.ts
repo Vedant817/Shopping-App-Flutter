@@ -12,8 +12,22 @@ describe('database TLS policy', () => {
     expect(databasePoolConfig('postgresql://localhost/threadline', false, 'development').ssl).toBeUndefined();
   });
 
-  it('validates certificates when TLS is enabled', () => {
-    expect(databasePoolConfig('postgresql://localhost/threadline', true, 'production').ssl).toEqual({ rejectUnauthorized: true });
+  it('verifies the server when a CA certificate is supplied', () => {
+    expect(databasePoolConfig('postgresql://localhost/threadline', true, 'production', 'PEM').ssl).toEqual({
+      rejectUnauthorized: true,
+      ca: 'PEM',
+    });
+  });
+
+  it('encrypts without verifying when no CA certificate is available', () => {
+    // Supabase's proxies chain to a Supabase root CA that is not in the public
+    // trust store, so verification fails unless that root is downloaded from
+    // the Supabase dashboard and supplied. This matches sslmode=require, which
+    // is the mode Supabase documents: encrypted, but the server is not
+    // authenticated. Set DATABASE_CA_CERT_PATH to close the gap.
+    expect(databasePoolConfig('postgresql://localhost/threadline', true, 'production').ssl).toEqual({
+      rejectUnauthorized: false,
+    });
   });
 
   it('rejects production environment loading with TLS disabled', () => {

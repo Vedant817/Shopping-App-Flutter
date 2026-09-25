@@ -240,6 +240,24 @@ SMOKE_DATABASE_URL=postgresql://postgres:local-dev@127.0.0.1:55450/threadline \
 
 The service refuses to start on an invalid environment. `SHOPIFY_OAUTH_CALLBACK_URL` must be HTTPS in production, and may use plain HTTP on loopback only outside it. Operational tuning values (`OAUTH_STATE_TTL_SECONDS`, the `INGESTION_*` retry and queue settings, `LOG_LEVEL`, `TRUST_PROXY`) fall back to the same defaults the Render blueprint sets, so only real secrets must be supplied. The Flutter client applies the same rule to `API_BASE_URL` and `SUPABASE_URL`: HTTPS everywhere, plain HTTP on loopback for local development.
 
+### Database connection
+
+Use the **session pooler** connection string, not the direct one. Direct connections are IPv6-only unless the project has the IPv4 add-on, and Render cannot reach them. Copy the host from the dashboard's Connect dialog rather than composing it from the region, because a region can have more than one pooler cluster.
+
+Supabase's proxies present a chain rooted in the "Supabase Root 2021 CA", which is not in the public trust store, and the server does not send that root. Verifying it therefore fails unless you download the root certificate from **Supabase Dashboard → Settings → Database → Download Certificate**, save it into `service/`, and set `DATABASE_CA_CERT_PATH` to its filename.
+
+With no certificate configured the service connects with encryption but without server authentication, which is exactly `sslmode=require` — the mode Supabase documents as the default. The service logs a warning at startup whenever TLS is on and no certificate is configured, so the weaker mode is never silent.
+
+### Databases that already have the schema applied
+
+`scripts/baseline-migrations.mjs` exists for a database whose schema was created by running the SQL directly rather than through the Drizzle migrator. The migrator decides what to run by comparing the newest `drizzle.__drizzle_migrations.created_at` against each migration file's journal timestamp, so recording a single row stamped at the last applied migration makes it skip everything up to that point and apply only what is genuinely pending. It refuses to run against an empty schema, and does nothing if migrations are already recorded.
+
+```bash
+cd service
+node scripts/baseline-migrations.mjs 0004_role_constraint_snapshot
+node dist/migrate.js
+```
+
 ## Live verification checklist
 
 Do not treat local tests as proof that external integrations work. After credentials and infrastructure exist, verify in this order:
