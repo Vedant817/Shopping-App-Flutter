@@ -13,7 +13,7 @@ void main() {
       final config = RuntimeConfig.fromValues(
         apiBaseUrl: '',
         supabaseUrl: 'http://project.supabase.co',
-        supabasePublishableKey: 'sb_secret_not_allowed',
+        supabasePublishableKey: 'sb_secret_',
         shopifyMobileReturnUrl: 'https://example.com/callback',
       );
 
