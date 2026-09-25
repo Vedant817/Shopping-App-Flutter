@@ -1,11 +1,11 @@
 import { sql } from 'drizzle-orm';
 import type { AppConfig } from '../config/env.js';
-import { decryptToken } from '../crypto/token-vault.js';
 import type { Database } from '../db/client.js';
-import { getInstallation, getWorkspaceByShopDomain, markWorkspaceUninstalled, recordAuditEvent } from '../db/operations.js';
+import { getWorkspaceByShopDomain, markWorkspaceUninstalled, recordAuditEvent } from '../db/operations.js';
 import { upsertCustomEvent, upsertCustomer, upsertOrder, upsertProduct, upsertRefund } from '../db/upserts.js';
 import { processCustomerDataRequest, purgeUninstalledShop, redactCustomer } from './compliance.js';
 import { verifyHmacHex } from '../utils/hmac.js';
+import { resolveShopifyAccess } from '../shopify/access-token.js';
 import { normalizeMyshopifyDomain } from '../shopify/domain.js';
 import { ShopifyGraphqlClient } from '../shopify/graphql-client.js';
 import { CUSTOMER_BY_ID_QUERY, ORDER_BY_ID_QUERY, PRODUCT_BY_ID_QUERY, REFUND_BY_ID_QUERY } from '../shopify/queries.js';
@@ -160,12 +160,12 @@ async function processCompliance(db: Database, workspaceId: string, webhookId: s
 
 async function fetchCanonicalResource(db: Database, config: AppConfig | undefined, workspaceId: string, resource: CanonicalResource, stableId: string, shopDomain: string): Promise<Record<string, unknown>> {
   if (!config) throw new Error('Webhook canonical refetch configuration is required');
-  const installation = await getInstallation(db, workspaceId);
+  const installation = await resolveShopifyAccess({ db, config, workspaceId });
   if (!installation) throw new Error('Shopify installation is not active');
   if (installation.shopDomain !== shopDomain) throw new Error('Webhook shop does not match the workspace installation');
   const client = new ShopifyGraphqlClient({
     shopDomain: installation.shopDomain,
-    accessToken: decryptToken(installation.encryptedOfflineToken, config.shopifyTokenEncryptionKey),
+    accessToken: installation.accessToken,
     apiVersion: installation.apiVersion || config.shopifyApiVersion,
   });
   if (resource === 'product') {

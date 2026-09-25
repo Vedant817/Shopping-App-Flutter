@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceDirectory = join(root, 'drizzle');
 const targetDirectory = resolve(root, '..', 'supabase', 'migrations');
-const targetNames = ['0000_threadline_schema.sql', '0001_threadline_rls.sql', '0002_mobile_contract.sql', '0003_compliance_and_hardening.sql', '0004_role_constraint_snapshot.sql'];
+const targetNames = ['0000_threadline_schema.sql', '0001_threadline_rls.sql', '0002_mobile_contract.sql', '0003_compliance_and_hardening.sql', '0004_role_constraint_snapshot.sql', '0005_expiring_offline_tokens.sql'];
 const sources = readdirSync(sourceDirectory).filter((name) => /^\d{4}_.+\.sql$/.test(name)).sort();
 if (sources.length !== targetNames.length) throw new Error(`Expected ${targetNames.length} Drizzle migrations, found ${sources.length}`);
 const check = process.argv.includes('--check');

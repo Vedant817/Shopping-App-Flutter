@@ -12,6 +12,12 @@ const requiredInt = (minimum: number, maximum: number) =>
     z.coerce.number().int().min(minimum).max(maximum),
   );
 
+const optionalInt = (minimum: number, maximum: number, fallback: number) =>
+  z.preprocess(
+    (value) => (value === undefined || value === null || value === '' ? fallback : value),
+    z.coerce.number().int().min(minimum).max(maximum),
+  );
+
 const requiredBoolean = z.preprocess(
   (value) => {
     if (typeof value !== 'string' || value.trim() === '') return undefined;
@@ -82,6 +88,7 @@ const configSchema = z.object({
     z.string().regex(/^\d{4}-(01|04|07|10)$/),
   ),
   SHOPIFY_TOKEN_ENCRYPTION_KEY: encryptionKey,
+  SHOPIFY_TOKEN_REFRESH_LEAD_SECONDS: optionalInt(60, 3600, 300),
   SHOPIFY_SCOPES: requiredText,
   APP_BASE_URL: z.preprocess(
     (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
@@ -116,6 +123,7 @@ export type AppConfig = {
   shopifyWebhookSecret: string;
   shopifyApiVersion: string;
   shopifyTokenEncryptionKey: string;
+  shopifyTokenRefreshLeadSeconds: number;
   shopifyScopes: string[];
   appBaseUrl: string;
   shopifyOauthCallbackUrl: string;
@@ -155,6 +163,7 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
     shopifyWebhookSecret: value.SHOPIFY_WEBHOOK_SECRET,
     shopifyApiVersion: value.SHOPIFY_API_VERSION,
     shopifyTokenEncryptionKey: value.SHOPIFY_TOKEN_ENCRYPTION_KEY,
+    shopifyTokenRefreshLeadSeconds: value.SHOPIFY_TOKEN_REFRESH_LEAD_SECONDS,
     shopifyScopes: value.SHOPIFY_SCOPES.split(/[\s,]+/).map((scope) => scope.trim()).filter(Boolean),
     appBaseUrl: value.APP_BASE_URL.replace(/\/$/, ''),
     shopifyOauthCallbackUrl: value.SHOPIFY_OAUTH_CALLBACK_URL,

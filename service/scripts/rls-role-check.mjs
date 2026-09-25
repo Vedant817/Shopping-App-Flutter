@@ -38,7 +38,7 @@ await client.query('grant usage, select, update on all sequences in schema publi
 await client.query('insert into app_users (id, email) values ($1, $2), ($3, $4)', [userA, 'a@example.test', userB, 'b@example.test']);
 await client.query('insert into workspaces (id, shop_domain, name, currency_code, time_zone) values ($1, $2, $3, $4, $5), ($6, $7, $8, $9, $10)', [workspaceA, `${workspaceA}.myshopify.com`, 'A', 'USD', 'UTC', workspaceB, `${workspaceB}.myshopify.com`, 'B', 'USD', 'UTC']);
 await client.query('insert into workspace_members (workspace_id, user_id, role) values ($1, $2, $3)', [workspaceA, userA, 'owner']);
-await client.query('insert into shopify_installations (workspace_id, encrypted_offline_token, scopes, api_version) values ($1, $2, $3, $4)', [workspaceA, 'encrypted-test-token', ['read_products'], '2026-01']);
+await client.query('insert into shopify_installations (workspace_id, encrypted_offline_token, encrypted_refresh_token, scopes, api_version) values ($1, $2, $3, $4, $5)', [workspaceA, 'encrypted-test-token', 'encrypted-test-refresh-token', ['read_products'], '2026-01']);
 
 async function expectDenied(query, values = []) {
   await client.query('begin');
@@ -59,6 +59,7 @@ async function expectDenied(query, values = []) {
 await expectDenied('select * from workspace_members');
 await expectDenied('select * from workspaces where id = $1', [workspaceB]);
 await expectDenied('select encrypted_offline_token from shopify_installations');
+await expectDenied('select encrypted_refresh_token from shopify_installations');
 await expectDenied('insert into workspace_members (workspace_id, user_id, role) values ($1, $2, $3)', [workspaceA, userB, 'owner']);
 await expectDenied('update workspace_members set role = $1 where workspace_id = $2 and user_id = $3', ['owner', workspaceA, userA]);
 await expectDenied('delete from workspace_members where workspace_id = $1 and user_id = $2', [workspaceA, userA]);
@@ -77,8 +78,8 @@ try {
 if (!anonDenied) throw new Error('Expected anon Data API denial');
 await client.query('begin');
 await client.query('set role service_role');
-const serviceRows = await client.query('select encrypted_offline_token from shopify_installations where workspace_id = $1', [workspaceA]);
-if (serviceRows.rows.length !== 1 || serviceRows.rows[0].encrypted_offline_token !== 'encrypted-test-token') throw new Error('service_role could not read the intended installation');
+const serviceRows = await client.query('select encrypted_offline_token, encrypted_refresh_token from shopify_installations where workspace_id = $1', [workspaceA]);
+if (serviceRows.rows.length !== 1 || serviceRows.rows[0].encrypted_offline_token !== 'encrypted-test-token' || serviceRows.rows[0].encrypted_refresh_token !== 'encrypted-test-refresh-token') throw new Error('service_role could not read the intended installation');
 await client.query('commit');
 await client.query('reset role');
 await client.query('update workspaces set uninstalled_at = now() where id = $1', [workspaceA]);

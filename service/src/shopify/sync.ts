@@ -1,10 +1,9 @@
 import { sql } from 'drizzle-orm';
 import type { AppConfig } from '../config/env.js';
-import { decryptToken } from '../crypto/token-vault.js';
 import type { Database } from '../db/client.js';
-import { getInstallation } from '../db/operations.js';
 import { upsertCheckoutWithExecutor, upsertCustomerWithExecutor, upsertOrderWithExecutor, upsertProductWithExecutor } from '../db/upserts.js';
 import { updateJobResourcePage } from '../ingestion/queue.js';
+import { resolveShopifyAccess } from './access-token.js';
 import { ShopifyGraphqlClient, type GraphqlConnection, type GraphqlPage } from './graphql-client.js';
 import { ABANDONED_CHECKOUTS_QUERY, ABANDONED_CHECKOUT_LINES_QUERY, CUSTOMERS_QUERY, ORDERS_QUERY, ORDER_LINE_ITEMS_QUERY, PRODUCTS_QUERY, PRODUCT_VARIANTS_QUERY } from './queries.js';
 
@@ -140,12 +139,11 @@ export async function runSyncResource(
   resource: SyncResource,
   options: { jobId?: string; now?: () => Date; client?: SyncClient } = {},
 ): Promise<SyncRunResult> {
-  const installation = options.client ? undefined : await getInstallation(db, workspaceId);
+  const installation = options.client ? undefined : await resolveShopifyAccess({ db, config, workspaceId });
   if (!options.client && !installation) throw new Error('Shopify installation is not active');
-  const accessToken = installation ? decryptToken(installation.encryptedOfflineToken, config.shopifyTokenEncryptionKey) : '';
   const client = options.client ?? new ShopifyGraphqlClient({
     shopDomain: installation!.shopDomain,
-    accessToken,
+    accessToken: installation!.accessToken,
     apiVersion: installation!.apiVersion || config.shopifyApiVersion,
   });
   const state = await readSyncState(db, workspaceId, resource);

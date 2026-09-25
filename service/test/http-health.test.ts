@@ -18,6 +18,7 @@ function config(): AppConfig {
     shopifyWebhookSecret: 'webhook-secret',
     shopifyApiVersion: '2026-01',
     shopifyTokenEncryptionKey: randomBytes(32).toString('base64'),
+    shopifyTokenRefreshLeadSeconds: 300,
     shopifyScopes: ['read_products'],
     appBaseUrl: 'https://app.example.test',
     shopifyOauthCallbackUrl: 'https://api.example.test/v1/auth/shopify/callback',

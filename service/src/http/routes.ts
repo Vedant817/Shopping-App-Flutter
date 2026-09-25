@@ -130,7 +130,15 @@ export async function registerRoutes(app: FastifyInstance, dependencies: RouteDe
       const profile = await fetchShopProfile(client);
       const requestedWorkspaceId = state.workspaceId ?? existing?.id ?? randomUUID();
       const workspaceId = await upsertWorkspace(db, { id: requestedWorkspaceId, shopDomain: callback.shopDomain, name: profile.name, currencyCode: profile.currencyCode, timeZone: profile.timeZone, shopifyShopId: profile.id });
-      await upsertInstallation(db, { workspaceId, encryptedOfflineToken: encryptToken(token.accessToken, config.shopifyTokenEncryptionKey), scopes: token.scopes.length > 0 ? token.scopes : config.shopifyScopes, apiVersion: config.shopifyApiVersion });
+      await upsertInstallation(db, {
+        workspaceId,
+        encryptedOfflineToken: encryptToken(token.accessToken, config.shopifyTokenEncryptionKey),
+        encryptedRefreshToken: token.refreshToken ? encryptToken(token.refreshToken, config.shopifyTokenEncryptionKey) : null,
+        accessTokenExpiresAt: tokenExpiry(token.expiresIn, clock()),
+        refreshTokenExpiresAt: tokenExpiry(token.refreshTokenExpiresIn, clock()),
+        scopes: token.scopes.length > 0 ? token.scopes : config.shopifyScopes,
+        apiVersion: config.shopifyApiVersion,
+      });
       await ensureAppUser(db, state.userId);
       const membershipAdded = await addWorkspaceMember(db, workspaceId, state.userId, 'owner');
       await recordAuditEvent(db, { workspaceId, actorUserId: state.userId, action: membershipAdded ? 'shopify.installed' : 'shopify.reinstalled', resourceType: 'workspace', resourceId: workspaceId, metadata: { shopDomain: callback.shopDomain, apiVersion: config.shopifyApiVersion, membershipAdded } });
@@ -508,4 +516,8 @@ function idempotencyKey(request: FastifyRequest, prefix: string): string {
 
 function hashState(value: string): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function tokenExpiry(seconds: number | undefined, now: Date): Date | null {
+  return seconds === undefined ? null : new Date(now.getTime() + seconds * 1000);
 }

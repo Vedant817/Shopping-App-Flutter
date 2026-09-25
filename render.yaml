@@ -13,6 +13,8 @@ envVarGroups:
         value: authenticated
       - key: SHOPIFY_API_VERSION
         value: "2026-07"
+      - key: SHOPIFY_TOKEN_REFRESH_LEAD_SECONDS
+        value: "300"
       - key: OAUTH_STATE_TTL_SECONDS
         value: "600"
       - key: OAUTH_CALLBACK_MAX_AGE_SECONDS

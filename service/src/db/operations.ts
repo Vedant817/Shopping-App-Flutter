@@ -13,8 +13,22 @@ export type WorkspaceInput = {
 export type InstallationInput = {
   workspaceId: string;
   encryptedOfflineToken: string;
+  encryptedRefreshToken?: string | null;
+  accessTokenExpiresAt?: Date | null;
+  refreshTokenExpiresAt?: Date | null;
   scopes: string[];
   apiVersion: string;
+};
+
+export type InstallationRecord = {
+  encryptedOfflineToken: string;
+  encryptedRefreshToken: string | null;
+  accessTokenExpiresAt: Date | null;
+  refreshTokenExpiresAt: Date | null;
+  reauthorizeRequiredAt: Date | null;
+  scopes: string[];
+  apiVersion: string;
+  shopDomain: string;
 };
 
 export async function upsertWorkspace(db: Database, input: WorkspaceInput): Promise<string> {
@@ -127,16 +141,53 @@ async function countOwnersWithExecutor(db: Pick<Database, 'execute'>, workspaceI
 export async function upsertInstallation(db: Database, input: InstallationInput): Promise<void> {
   await db.transaction(async (tx) => {
     await tx.execute(sql`
-      insert into shopify_installations (workspace_id, encrypted_offline_token, scopes, api_version)
-      values (${input.workspaceId}, ${input.encryptedOfflineToken}, ${textArrayLiteral(input.scopes)}::text[], ${input.apiVersion})
+      insert into shopify_installations (workspace_id, encrypted_offline_token, encrypted_refresh_token, access_token_expires_at, refresh_token_expires_at, reauthorize_required_at, scopes, api_version)
+      values (${input.workspaceId}, ${input.encryptedOfflineToken}, ${input.encryptedRefreshToken ?? null}, ${input.accessTokenExpiresAt ?? null}, ${input.refreshTokenExpiresAt ?? null}, null, ${textArrayLiteral(input.scopes)}::text[], ${input.apiVersion})
       on conflict (workspace_id) do update set
         encrypted_offline_token = excluded.encrypted_offline_token,
+        encrypted_refresh_token = excluded.encrypted_refresh_token,
+        access_token_expires_at = excluded.access_token_expires_at,
+        refresh_token_expires_at = excluded.refresh_token_expires_at,
+        reauthorize_required_at = null,
         scopes = excluded.scopes,
         api_version = excluded.api_version,
         installed_at = now(), uninstalled_at = null, updated_at = now()
     `);
     await tx.execute(sql`update workspaces set uninstalled_at = null, updated_at = now() where id = ${input.workspaceId}`);
   });
+}
+
+export async function rotateInstallationTokens(db: Database, input: {
+  workspaceId: string;
+  expectedEncryptedRefreshToken: string;
+  encryptedOfflineToken: string;
+  encryptedRefreshToken: string | null;
+  accessTokenExpiresAt: Date | null;
+  refreshTokenExpiresAt: Date | null;
+  scopes?: string[];
+}): Promise<boolean> {
+  const result = await db.execute(sql`
+    update shopify_installations
+    set encrypted_offline_token = ${input.encryptedOfflineToken},
+        encrypted_refresh_token = ${input.encryptedRefreshToken},
+        access_token_expires_at = ${input.accessTokenExpiresAt},
+        refresh_token_expires_at = ${input.refreshTokenExpiresAt},
+        reauthorize_required_at = null,
+        scopes = coalesce(${input.scopes ? textArrayLiteral(input.scopes) : null}::text[], scopes),
+        updated_at = now()
+    where workspace_id = ${input.workspaceId}
+      and encrypted_refresh_token = ${input.expectedEncryptedRefreshToken}
+  `);
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function requireReauthorization(db: Database, workspaceId: string, reason: string): Promise<void> {
+  await db.execute(sql`
+    update shopify_installations
+    set encrypted_refresh_token = null, refresh_token_expires_at = null, reauthorize_required_at = now(), updated_at = now()
+    where workspace_id = ${workspaceId}
+  `);
+  await recordAuditEvent(db, { workspaceId, action: 'shopify.reauthorization_required', resourceType: 'workspace', resourceId: workspaceId, metadata: { reason } });
 }
 
 export async function markWorkspaceUninstalled(db: Database, workspaceId: string): Promise<void> {
@@ -172,9 +223,9 @@ export async function purgeWorkspaceData(db: Database, workspaceId: string): Pro
   });
 }
 
-export async function getInstallation(db: Database, workspaceId: string): Promise<{ encryptedOfflineToken: string; scopes: string[]; apiVersion: string; shopDomain: string } | undefined> {
+export async function getInstallation(db: Database, workspaceId: string): Promise<InstallationRecord | undefined> {
   const result = await db.execute(sql`
-    select i.encrypted_offline_token, i.scopes, i.api_version, w.shop_domain
+    select i.encrypted_offline_token, i.encrypted_refresh_token, i.access_token_expires_at, i.refresh_token_expires_at, i.reauthorize_required_at, i.scopes, i.api_version, w.shop_domain
     from shopify_installations i
     join workspaces w on w.id = i.workspace_id
     where i.workspace_id = ${workspaceId} and i.uninstalled_at is null and w.uninstalled_at is null
@@ -184,10 +235,20 @@ export async function getInstallation(db: Database, workspaceId: string): Promis
   if (!row) return undefined;
   return {
     encryptedOfflineToken: String(row.encrypted_offline_token),
+    encryptedRefreshToken: row.encrypted_refresh_token === null || row.encrypted_refresh_token === undefined ? null : String(row.encrypted_refresh_token),
+    accessTokenExpiresAt: optionalDate(row.access_token_expires_at),
+    refreshTokenExpiresAt: optionalDate(row.refresh_token_expires_at),
+    reauthorizeRequiredAt: optionalDate(row.reauthorize_required_at),
     scopes: Array.isArray(row.scopes) ? row.scopes.map(String) : [],
     apiVersion: String(row.api_version),
     shopDomain: String(row.shop_domain),
   };
+}
+
+function optionalDate(value: unknown): Date | null {
+  if (value === null || value === undefined) return null;
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 export async function recordAuditEvent(db: Database, input: {

@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceDirectory = join(root, 'drizzle');
 const targetDirectory = resolve(root, '..', 'supabase', 'migrations');
-const targetNames = ['0000_threadline_schema.sql', '0001_threadline_rls.sql', '0002_mobile_contract.sql', '0003_compliance_and_hardening.sql', '0004_role_constraint_snapshot.sql'];
+const targetNames = ['0000_threadline_schema.sql', '0001_threadline_rls.sql', '0002_mobile_contract.sql', '0003_compliance_and_hardening.sql', '0004_role_constraint_snapshot.sql', '0005_expiring_offline_tokens.sql'];
 
 describe('authoritative migration mirrors', () => {
   it('keeps Supabase migrations semantically identical to the Drizzle chain', () => {
@@ -21,7 +21,7 @@ describe('authoritative migration mirrors', () => {
 
   it('contains the runtime schema and security SQL in the authoritative chain', () => {
     const sql = readdirSync(sourceDirectory).filter((name) => /^\d{4}_.+\.sql$/.test(name)).sort().map((name) => readFileSync(join(sourceDirectory, name), 'utf8')).join('\n');
-    for (const token of ['ingestion_jobs', 'updated_at', 'order_lines', 'product_variants', 'watermark_at', 'variants_complete', 'ROW LEVEL SECURITY', 'REVOKE ALL', 'service_metadata', 'refunds']) {
+    for (const token of ['ingestion_jobs', 'updated_at', 'order_lines', 'product_variants', 'watermark_at', 'variants_complete', 'ROW LEVEL SECURITY', 'REVOKE ALL', 'service_metadata', 'refunds', 'encrypted_refresh_token', 'access_token_expires_at']) {
       expect(sql).toContain(token);
     }
   });

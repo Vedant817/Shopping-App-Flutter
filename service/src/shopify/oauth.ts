@@ -4,6 +4,8 @@ import { normalizeMyshopifyDomain } from './domain.js';
 
 export type OAuthQuery = Record<string, string | string[] | undefined>;
 
+const tokenRequestTimeoutMs = 30_000;
+
 function firstValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -77,7 +79,16 @@ export type ShopifyTokenResponse = {
   accessToken: string;
   scopes: string[];
   shopDomain: string;
+  refreshToken?: string;
+  expiresIn?: number;
+  refreshTokenExpiresIn?: number;
 };
+
+export type ShopifyTokenRefreshOutcome =
+  | { status: 'refreshed'; token: ShopifyTokenResponse }
+  | { status: 'reauthorize' }
+  | { status: 'retry' }
+  | { status: 'failed' };
 
 export async function exchangeAuthorizationCode(options: {
   shopDomain: string;
@@ -95,6 +106,7 @@ export async function exchangeAuthorizationCode(options: {
     code: options.code,
     redirect_uri: options.redirectUri,
     grant_type: 'authorization_code',
+    expiring: '1',
   });
   if (options.codeVerifier) body.set('code_verifier', options.codeVerifier);
   const response = await (options.fetchImpl ?? fetch)(`https://${shopDomain}/admin/oauth/access_token`, {
@@ -114,7 +126,62 @@ export async function exchangeAuthorizationCode(options: {
     accessToken: payload.access_token,
     scopes: rawScopes.split(',').map((scope) => scope.trim()).filter(Boolean),
     shopDomain,
+    refreshToken: optionalToken(payload.refresh_token),
+    expiresIn: optionalPositiveSeconds(payload.expires_in),
+    refreshTokenExpiresIn: optionalPositiveSeconds(payload.refresh_token_expires_in),
   };
+}
+
+export async function refreshOfflineAccessToken(options: {
+  shopDomain: string;
+  refreshToken: string;
+  clientId: string;
+  clientSecret: string;
+  fetchImpl?: typeof fetch;
+}): Promise<ShopifyTokenRefreshOutcome> {
+  const shopDomain = normalizeMyshopifyDomain(options.shopDomain);
+  let response: Response;
+  try {
+    response = await (options.fetchImpl ?? fetch)(`https://${shopDomain}/admin/oauth/access_token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+      body: new URLSearchParams({
+        client_id: options.clientId,
+        client_secret: options.clientSecret,
+        grant_type: 'refresh_token',
+        refresh_token: options.refreshToken,
+      }),
+      signal: AbortSignal.timeout(tokenRequestTimeoutMs),
+    });
+  } catch {
+    return { status: 'retry' };
+  }
+  if (response.status === 401) return { status: 'reauthorize' };
+  if (response.status === 429 || response.status >= 500) return { status: 'retry' };
+  const payload = await readJson(response);
+  if (!response.ok || !isRecord(payload) || typeof payload.access_token !== 'string') {
+    return { status: 'failed' };
+  }
+  return {
+    status: 'refreshed',
+    token: {
+      accessToken: payload.access_token,
+      scopes: typeof payload.scope === 'string' ? payload.scope.split(',').map((scope) => scope.trim()).filter(Boolean) : [],
+      shopDomain,
+      refreshToken: optionalToken(payload.refresh_token),
+      expiresIn: optionalPositiveSeconds(payload.expires_in),
+      refreshTokenExpiresIn: optionalPositiveSeconds(payload.refresh_token_expires_in),
+    },
+  };
+}
+
+function optionalToken(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function optionalPositiveSeconds(value: unknown): number | undefined {
+  const seconds = Number(value);
+  return Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : undefined;
 }
 
 async function readJson(response: Response): Promise<unknown> {

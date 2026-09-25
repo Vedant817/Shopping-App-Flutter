@@ -122,7 +122,8 @@ The complete names are listed in `.env.example`. The important values are:
 | `SHOPIFY_API_SECRET` | Shopify app client secret |
 | `SHOPIFY_WEBHOOK_SECRET` | Secret used to verify Shopify webhook HMACs |
 | `SHOPIFY_API_VERSION` | Pinned Shopify Admin GraphQL version |
-| `SHOPIFY_TOKEN_ENCRYPTION_KEY` | Base64-encoded 32-byte key for offline tokens |
+| `SHOPIFY_TOKEN_ENCRYPTION_KEY` | Base64-encoded 32-byte key for offline and refresh tokens |
+| `SHOPIFY_TOKEN_REFRESH_LEAD_SECONDS` | How long before expiry a token is refreshed; defaults to `300` |
 | `SHOPIFY_SCOPES` | Space- or comma-separated approved scopes |
 | `APP_BASE_URL` | Public HTTPS API base URL |
 | `SHOPIFY_OAUTH_CALLBACK_URL` | Exact API callback URL |
@@ -161,6 +162,16 @@ The service must have the same mobile return URL in `SHOPIFY_MOBILE_POST_INSTALL
 - The service validates Supabase JWTs against JWKS and checks workspace membership on every tenant route.
 - Workspace roles and capabilities are server-authoritative. The client hides unauthorized actions, while the service remains the enforcement point.
 - Shopify offline tokens are encrypted at rest by the service and are never sent to Flutter.
+
+### Shopify token lifecycle
+
+The app requests expiring offline access tokens, because Shopify rejects non-expiring tokens on GraphQL Admin API requests for public apps. Public apps must be on expiring tokens by January 1, 2027.
+
+- The authorization code exchange sends `expiring=1` and stores the access token, the refresh token, and both expiry times. The refresh token is encrypted with the same key as the access token.
+- Access tokens last one hour. Before a token enters the refresh window (`SHOPIFY_TOKEN_REFRESH_LEAD_SECONDS`, default 300 seconds), every sync and webhook refetch renews it through the `refresh_token` grant and stores the replacement pair.
+- Each refresh returns a new refresh token. The stored value is replaced with a compare-and-swap on the previous one, so two workers refreshing the same shop cannot overwrite each other; the loser of the race re-reads the winner's tokens.
+- A transient refresh failure (network, `429`, `5xx`) fails the ingestion job so the queue retries it. A rejected refresh (`401`) is terminal: the installation is flagged with `reauthorize_required_at`, an audit event is recorded, and further ingestion stops until the merchant completes OAuth again. Reinstalling through the app clears the flag.
+- An installation with no expiry stored is treated as non-expiring and is used as-is, so an installation created before this migration keeps working until the merchant reinstalls.
 
 ## Client behavior
 

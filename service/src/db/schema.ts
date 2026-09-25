@@ -55,6 +55,10 @@ export const workspaceMembers = pgTable('workspace_members', {
 export const shopifyInstallations = pgTable('shopify_installations', {
   workspaceId: text('workspace_id').primaryKey().references(() => workspaces.id, { onDelete: 'cascade' }),
   encryptedOfflineToken: text('encrypted_offline_token').notNull(),
+  encryptedRefreshToken: text('encrypted_refresh_token'),
+  accessTokenExpiresAt: timestamp('access_token_expires_at', { withTimezone: true }),
+  refreshTokenExpiresAt: timestamp('refresh_token_expires_at', { withTimezone: true }),
+  reauthorizeRequiredAt: timestamp('reauthorize_required_at', { withTimezone: true }),
   scopes: text('scopes').array().notNull(),
   apiVersion: text('api_version').notNull(),
   installedAt: timestamp('installed_at', { withTimezone: true }).notNull().defaultNow(),
