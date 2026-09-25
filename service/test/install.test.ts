@@ -1,7 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { AppConfig } from '../src/config/env.js';
+import { decryptToken } from '../src/crypto/token-vault.js';
 import { createShopifyAuthorization, postInstallReturnUrl } from '../src/shopify/install.js';
+import { pkceCodeChallenge } from '../src/shopify/oauth.js';
 
 function config(): AppConfig {
   return {
@@ -57,6 +59,32 @@ describe('mobile Shopify install', () => {
     expect(url.hostname).toBe('example-shop.myshopify.com');
     expect(url.searchParams.get('redirect_uri')).toBe('https://api.example.test/v1/auth/shopify/callback');
     expect(url.searchParams.get('state')).toBeTruthy();
+  });
+
+  it('registers a PKCE challenge that matches the stored verifier', async () => {
+    const statements: unknown[] = [];
+    const db = {
+      execute: async (query: unknown) => { statements.push(query); return { rows: [] }; },
+    };
+    const cfg = config();
+    const result = await createShopifyAuthorization({
+      db: db as never,
+      config: cfg,
+      user: { id: 'user-1', claims: {} },
+      shop: 'example-shop.myshopify.com',
+      returnUrl: 'threadline://shopify/install',
+    });
+
+    const url = new URL(result.authorizationUrl);
+    const challenge = url.searchParams.get('code_challenge');
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(challenge).toBeTruthy();
+
+    const insert = statements.find((entry) => JSON.stringify(entry).includes('oauth_states'));
+    const envelope = /v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.exec(JSON.stringify(insert))?.[0];
+    expect(envelope).toBeTruthy();
+    const verifier = decryptToken(envelope!, cfg.shopifyTokenEncryptionKey);
+    expect(pkceCodeChallenge(verifier)).toBe(challenge);
   });
 
   it('rejects arbitrary return URLs and non-domain shop values', async () => {

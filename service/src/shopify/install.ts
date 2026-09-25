@@ -7,7 +7,7 @@ import type { Database } from '../db/client.js';
 import { getWorkspaceByShopDomain } from '../db/operations.js';
 import { createOAuthState } from '../db/oauth-state.js';
 import { normalizeMyshopifyDomain } from './domain.js';
-import { buildShopifyAuthorizeUrl } from './oauth.js';
+import { buildShopifyAuthorizeUrl, pkceCodeChallenge } from './oauth.js';
 
 export type ShopifyInstallInput = {
   db: Database;
@@ -54,6 +54,7 @@ export async function createShopifyAuthorization(input: ShopifyInstallInput): Pr
       redirectUri: input.config.shopifyOauthCallbackUrl,
       state,
       scopes: input.config.shopifyScopes,
+      codeChallenge: pkceCodeChallenge(codeVerifier),
     }),
     shopDomain,
     returnUrl: input.returnUrl,

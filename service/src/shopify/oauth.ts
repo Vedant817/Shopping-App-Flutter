@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { hmacSha256 } from '../utils/hmac.js';
 import { normalizeMyshopifyDomain } from './domain.js';
 
@@ -59,12 +59,17 @@ export function verifyOAuthCallback(options: {
   return { code, shopDomain, state, timestamp };
 }
 
+export function pkceCodeChallenge(codeVerifier: string): string {
+  return createHash('sha256').update(codeVerifier).digest('base64url');
+}
+
 export function buildShopifyAuthorizeUrl(options: {
   shopDomain: string;
   clientId: string;
   redirectUri: string;
   state: string;
   scopes: readonly string[];
+  codeChallenge?: string;
 }): string {
   const shopDomain = normalizeMyshopifyDomain(options.shopDomain);
   const url = new URL(`https://${shopDomain}/admin/oauth/authorize`);
@@ -72,6 +77,10 @@ export function buildShopifyAuthorizeUrl(options: {
   url.searchParams.set('scope', options.scopes.join(','));
   url.searchParams.set('redirect_uri', options.redirectUri);
   url.searchParams.set('state', options.state);
+  if (options.codeChallenge) {
+    url.searchParams.set('code_challenge', options.codeChallenge);
+    url.searchParams.set('code_challenge_method', 'S256');
+  }
   return url.toString();
 }
 
@@ -116,7 +125,12 @@ export async function exchangeAuthorizationCode(options: {
   });
   const payload = await readJson(response);
   if (!response.ok || !isRecord(payload) || typeof payload.access_token !== 'string') {
-    throw new Error('Shopify OAuth token exchange failed');
+    // Shopify explains the rejection in the body; discarding it turns a precise
+    // diagnosis into a generic "exchange failed".
+    const detail = isRecord(payload)
+      ? [optionalToken(payload.error), optionalToken(payload.error_description)].filter(Boolean).join(': ')
+      : '';
+    throw new Error(`Shopify OAuth token exchange failed (${response.status}${detail ? ` ${detail}` : ''})`);
   }
   if (typeof payload.shop !== 'string' || normalizeMyshopifyDomain(payload.shop) !== shopDomain) {
     throw new Error('Shopify OAuth returned an unexpected shop');
