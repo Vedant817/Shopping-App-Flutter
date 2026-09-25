@@ -125,9 +125,21 @@ export async function registerRoutes(app: FastifyInstance, dependencies: RouteDe
         if (existingRole !== 'owner' && existingRole !== 'admin') throw badRequest('Only an existing workspace administrator can reinstall this shop', 'workspace_reinstall_forbidden');
       }
       const codeVerifier = decryptToken(state.codeVerifierEncrypted, config.shopifyTokenEncryptionKey);
-      const token = await exchangeAuthorizationCode({ shopDomain: callback.shopDomain, code: callback.code, clientId: config.shopifyApiKey, clientSecret: config.shopifyApiSecret, redirectUri: state.redirectUri, codeVerifier, fetchImpl: dependencies.fetchImpl });
+      let token: Awaited<ReturnType<typeof exchangeAuthorizationCode>>;
+      try {
+        token = await exchangeAuthorizationCode({ shopDomain: callback.shopDomain, code: callback.code, clientId: config.shopifyApiKey, clientSecret: config.shopifyApiSecret, redirectUri: state.redirectUri, codeVerifier, fetchImpl: dependencies.fetchImpl });
+      } catch (error) {
+        request.log.error({ err: error, shopDomain: callback.shopDomain }, 'shopify token exchange failed');
+        throw badRequest('Shopify rejected the authorization code', 'token_exchange_failed');
+      }
       const client = new ShopifyGraphqlClient({ shopDomain: callback.shopDomain, accessToken: token.accessToken, apiVersion: config.shopifyApiVersion, fetchImpl: dependencies.fetchImpl });
-      const profile = await fetchShopProfile(client);
+      let profile: Awaited<ReturnType<typeof fetchShopProfile>>;
+      try {
+        profile = await fetchShopProfile(client);
+      } catch (error) {
+        request.log.error({ err: error, shopDomain: callback.shopDomain }, 'shopify shop profile fetch failed');
+        throw badRequest('The store profile could not be read with the granted token', 'shop_profile_failed');
+      }
       const requestedWorkspaceId = state.workspaceId ?? existing?.id ?? randomUUID();
       const workspaceId = await upsertWorkspace(db, { id: requestedWorkspaceId, shopDomain: callback.shopDomain, name: profile.name, currencyCode: profile.currencyCode, timeZone: profile.timeZone, shopifyShopId: profile.id });
       await upsertInstallation(db, {
@@ -151,6 +163,7 @@ export async function registerRoutes(app: FastifyInstance, dependencies: RouteDe
       return reply.redirect(postInstallReturnUrl(state.returnUrl, workspaceId));
     } catch (error) {
       if (error instanceof AppError) throw error;
+      request.log.error({ err: error, shopDomain: request.query && typeof (request.query as Record<string, unknown>).shop === 'string' ? (request.query as Record<string, string>).shop : undefined }, 'shopify install callback failed');
       throw badRequest('Shopify authorization could not be completed', 'oauth_callback_failed');
     }
   });
