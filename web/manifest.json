@@ -1,12 +1,11 @@
 {
-    "name": "shopping_app",
-    "short_name": "shopping_app",
+    "name": "Threadline Commerce Intelligence",
+    "short_name": "Threadline",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#F5F7FA",
+    "theme_color": "#3157D5",
+    "description": "Multi-tenant commerce data intelligence and ingestion control.",
     "prefer_related_applications": false,
     "icons": [
         {
