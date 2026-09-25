@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { hmacSha256 } from '../utils/hmac.js';
-import { normalizeMyshopifyDomain } from './domain.js';
+import { normalizeMyshopifyDomain, parseShopHost } from './domain.js';
 
 export type OAuthQuery = Record<string, string | string[] | undefined>;
 
@@ -132,8 +132,15 @@ export async function exchangeAuthorizationCode(options: {
       : '';
     throw new Error(`Shopify OAuth token exchange failed (${response.status}${detail ? ` ${detail}` : ''})`);
   }
-  if (typeof payload.shop !== 'string' || normalizeMyshopifyDomain(payload.shop) !== shopDomain) {
-    throw new Error('Shopify OAuth returned an unexpected shop');
+  if (payload.shop !== undefined && payload.shop !== null) {
+    if (typeof payload.shop !== 'string') throw new Error(`Shopify OAuth returned an unexpected shop (${typeof payload.shop})`);
+    let observed: string;
+    try {
+      observed = parseShopHost(payload.shop);
+    } catch {
+      throw new Error(`Shopify OAuth returned an unrecognised shop (${payload.shop})`);
+    }
+    if (observed !== shopDomain) throw new Error(`Shopify OAuth returned an unexpected shop (${observed})`);
   }
   const rawScopes = typeof payload.scope === 'string' ? payload.scope : '';
   return {
