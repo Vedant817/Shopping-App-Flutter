@@ -15,6 +15,14 @@ export function verifyHmacHex(value: string | Buffer, secret: string | Buffer, e
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
+export function verifyHmacBase64(value: string | Buffer, secret: string | Buffer, expectedBase64: string): boolean {
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(expectedBase64)) return false;
+  const expected = Buffer.from(expectedBase64, 'base64');
+  if (expected.length !== 32) return false;
+  const actual = hmacSha256(value, secret);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
 export function stableQueryString(params: Record<string, string | undefined>): string {
   return Object.entries(params)
     .filter(([, item]) => item !== undefined)

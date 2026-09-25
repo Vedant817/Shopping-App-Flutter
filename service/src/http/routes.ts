@@ -176,7 +176,7 @@ export async function registerRoutes(app: FastifyInstance, dependencies: RouteDe
       if (/HMAC|headers|topic|registered|valid JSON|body must|shop does not match|shop id|domain|required/i.test(message)) throw badRequest(message, 'invalid_webhook');
       throw error;
     }
-    return reply.code(202).send({ received: true, duplicate: result.duplicate });
+    return reply.code(200).send({ received: true, duplicate: result.duplicate });
   });
 
   app.get('/v1/workspaces', async (request) => {
@@ -438,29 +438,6 @@ export async function registerRoutes(app: FastifyInstance, dependencies: RouteDe
     const result = await enqueueJob(db, { workspaceId: tenantId, resource: 'full_sync', idempotencyKey: idempotencyKey(request, `manual-sync:${tenantId}`), maxAttempts: config.ingestionMaxAttempts, payload: { resources } });
     await recordAuditEvent(db, { workspaceId: tenantId, actorUserId: user.id, action: 'sync.enqueued', resourceType: 'ingestion_job', resourceId: result.job.id, metadata: { resources }, requestId: request.id });
     return reply.code(result.inserted ? 202 : 200).send({ jobId: result.job.id, status: result.job.status, duplicate: !result.inserted });
-  });
-
-  app.post('/webhooks/shopify', { config: { rawBody: true } }, async (request, reply) => {
-    const rawBody = (request as FastifyRequest & { rawBody?: Buffer }).rawBody;
-    if (!rawBody) throw badRequest('Raw webhook body is required');
-    let result;
-    try {
-      result = await acceptWebhook(db, {
-        rawBody,
-        hmac: headerValue(request, 'x-shopify-hmac-sha256'),
-        webhookId: headerValue(request, 'x-shopify-webhook-id'),
-        shopDomain: headerValue(request, 'x-shopify-shop-domain'),
-        topic: headerValue(request, 'x-shopify-topic'),
-        apiVersion: headerValue(request, 'x-shopify-api-version'),
-        maxAttempts: config.ingestionMaxAttempts,
-        secret: config.shopifyWebhookSecret,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Webhook could not be accepted';
-      if (/HMAC|headers|topic|registered|valid JSON|body must|shop does not match|shop id|domain|required/i.test(message)) throw badRequest(message, 'invalid_webhook');
-      throw error;
-    }
-    return reply.code(202).send({ received: true, duplicate: result.duplicate });
   });
 }
 

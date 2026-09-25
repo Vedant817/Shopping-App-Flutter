@@ -86,8 +86,12 @@ class RuntimeConfig {
       issues.add(ConfigIssue(name: name, message: 'A value is required.'));
       return null;
     }
+    final loopbackHttp =
+        uri != null &&
+        uri.scheme == 'http' &&
+        _loopbackHosts.contains(uri.host);
     if (uri == null ||
-        uri.scheme != 'https' ||
+        (uri.scheme != 'https' && !loopbackHttp) ||
         !uri.hasAuthority ||
         uri.host.isEmpty ||
         uri.userInfo.isNotEmpty ||
@@ -97,7 +101,8 @@ class RuntimeConfig {
         ConfigIssue(
           name: name,
           message:
-              'Use an absolute HTTPS URL without credentials, query, or fragment.',
+              'Use an absolute HTTPS URL without credentials, query, or fragment. '
+              'Plain HTTP is only allowed on loopback for local development.',
         ),
       );
       return null;
@@ -105,6 +110,8 @@ class RuntimeConfig {
     final path = uri.path.endsWith('/') ? uri.path : '${uri.path}/';
     return uri.replace(path: path);
   }
+
+  static const _loopbackHosts = {'127.0.0.1', 'localhost', '::1'};
 
   static Uri? _mobileReturnUrl(String value, List<ConfigIssue> issues) {
     final uri = Uri.tryParse(value);

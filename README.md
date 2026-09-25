@@ -219,6 +219,27 @@ npm run test:docker
 
 The test suite injects configuration, authentication, repositories, launchers, deep links, clocks, and polling delays. It covers setup validation, OTP/session transitions, onboarding, RFC 7807 errors, typed decimal DTOs, search and pagination, ranges, retry polling, stale tenant responses, detail isolation, member capabilities, dark mode, keyboard visibility, 320-pixel layouts, and large text.
 
+### Running the service against a real database
+
+Unit tests stub the database, so they cannot catch a mistake in generated SQL. `npm run test:docker` therefore also runs `scripts/local-smoke.mjs`, which starts the compiled service as a real process against a containerized PostgreSQL instance and drives it over HTTP with a real signed JWT and real webhook HMACs. It covers health and readiness, JWT rejection paths, tenant reads, tenant isolation, role enforcement, member management, the install URL, webhook acceptance and deduplication, request hygiene, and query validation.
+
+To run the stack by hand:
+
+```bash
+docker run --name threadline-local -p 55450:5432 \
+  -e POSTGRES_PASSWORD=local-dev -e POSTGRES_DB=threadline -d postgres:16-alpine
+
+cd service
+DATABASE_URL=postgresql://postgres:local-dev@127.0.0.1:55450/threadline \
+DATABASE_SSL=false NODE_ENV=development \
+  node dist/migrate.js
+
+SMOKE_DATABASE_URL=postgresql://postgres:local-dev@127.0.0.1:55450/threadline \
+  npm run test:smoke
+```
+
+The service refuses to start on an invalid environment. `SHOPIFY_OAUTH_CALLBACK_URL` must be HTTPS in production, and may use plain HTTP on loopback only outside it. Operational tuning values (`OAUTH_STATE_TTL_SECONDS`, the `INGESTION_*` retry and queue settings, `LOG_LEVEL`, `TRUST_PROXY`) fall back to the same defaults the Render blueprint sets, so only real secrets must be supplied. The Flutter client applies the same rule to `API_BASE_URL` and `SUPABASE_URL`: HTTPS everywhere, plain HTTP on loopback for local development.
+
 ## Live verification checklist
 
 Do not treat local tests as proof that external integrations work. After credentials and infrastructure exist, verify in this order:

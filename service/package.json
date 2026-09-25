@@ -21,7 +21,8 @@
     "migrations:check": "node scripts/sync-migrations.mjs --check",
     "test:migrations:clean": "npm run build && node scripts/clean-migrate-check.mjs",
     "test:rls-roles": "node scripts/rls-role-check.mjs",
-    "test:docker": "npm run build && node scripts/docker-check.mjs"
+    "test:docker": "npm run build && node scripts/docker-check.mjs",
+    "test:smoke": "node scripts/local-smoke.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",

@@ -42,6 +42,7 @@ try {
   run(process.execPath, ['scripts/clean-migrate-check.mjs'], { cwd: resolve(root, 'service'), env: { ...process.env, MIGRATION_DATABASE_URL: hostDatabaseUrl, MIGRATION_DATABASE_SSL: 'false', NODE_ENV: 'test' } });
   run(process.execPath, ['scripts/overview-integration.mjs'], { cwd: resolve(root, 'service'), env: { ...process.env, MIGRATION_DATABASE_URL: hostDatabaseUrl, MIGRATION_DATABASE_SSL: 'false', NODE_ENV: 'test' } });
   run(process.execPath, ['scripts/compliance-integration.mjs'], { cwd: resolve(root, 'service'), env: { ...process.env, MIGRATION_DATABASE_URL: hostDatabaseUrl, MIGRATION_DATABASE_SSL: 'false', NODE_ENV: 'test' } });
+  run(process.execPath, ['scripts/local-smoke.mjs'], { cwd: resolve(root, 'service'), env: { ...process.env, SMOKE_DATABASE_URL: hostDatabaseUrl, SMOKE_DATABASE_SSL: 'false', SMOKE_PORT: String(port + 20), NODE_ENV: 'test' } });
   console.log('docker-migration-check-valid');
 } finally {
   removeContainer();

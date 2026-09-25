@@ -18,6 +18,16 @@ const optionalInt = (minimum: number, maximum: number, fallback: number) =>
     z.coerce.number().int().min(minimum).max(maximum),
   );
 
+const optionalBoolean = (fallback: boolean) => z.preprocess(
+  (value) => {
+    if (value === undefined || value === null || value === '') return fallback;
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  },
+  z.boolean(),
+);
+
 const requiredBoolean = z.preprocess(
   (value) => {
     if (typeof value !== 'string' || value.trim() === '') return undefined;
@@ -49,12 +59,16 @@ const corsOrigin = requiredText.refine((value) => value.split(',').every((origin
   }
 }), 'CORS_ORIGIN must contain valid HTTP origins');
 
-const oauthCallbackUrl = z.preprocess(
+const loopbackHosts = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+
+const oauthCallbackUrl = (nodeEnv: string) => z.preprocess(
   (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
   z.string().url().refine((value) => {
     const url = new URL(value);
-    return url.protocol === 'https:' && !url.username && !url.password && !url.hash;
-  }, 'SHOPIFY_OAUTH_CALLBACK_URL must be an HTTPS URL without credentials or a fragment'),
+    if (url.username || url.password || url.hash) return false;
+    if (url.protocol === 'https:') return true;
+    return nodeEnv !== 'production' && url.protocol === 'http:' && loopbackHosts.has(url.hostname);
+  }, 'SHOPIFY_OAUTH_CALLBACK_URL must be an HTTPS URL without credentials or a fragment, and may only use plain HTTP on loopback outside production'),
 );
 
 const mobileReturnUrl = z.preprocess(
@@ -65,7 +79,7 @@ const mobileReturnUrl = z.preprocess(
   }, 'SHOPIFY_MOBILE_POST_INSTALL_RETURN_URL must be a safe absolute URL'),
 );
 
-const configSchema = z.object({
+const configSchema = (nodeEnv: string) => z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']),
   PORT: requiredInt(1, 65535),
   HOST: requiredText,
@@ -94,19 +108,19 @@ const configSchema = z.object({
     (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
     z.string().url(),
   ),
-  SHOPIFY_OAUTH_CALLBACK_URL: oauthCallbackUrl,
+  SHOPIFY_OAUTH_CALLBACK_URL: oauthCallbackUrl(nodeEnv),
   SHOPIFY_MOBILE_POST_INSTALL_RETURN_URL: mobileReturnUrl,
   CORS_ORIGIN: corsOrigin,
-  OAUTH_STATE_TTL_SECONDS: requiredInt(60, 3600),
-  OAUTH_CALLBACK_MAX_AGE_SECONDS: requiredInt(60, 600),
-  INGESTION_POLL_INTERVAL_MS: requiredInt(100, 60000),
-  INGESTION_STALE_LOCK_SECONDS: requiredInt(30, 86400),
-  INGESTION_MAX_ATTEMPTS: requiredInt(1, 20),
-  INGESTION_BATCH_SIZE: requiredInt(1, 100),
-  INGESTION_BACKOFF_BASE_SECONDS: requiredInt(1, 3600),
-  INGESTION_BACKOFF_MAX_SECONDS: requiredInt(1, 86400),
-  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']),
-  TRUST_PROXY: requiredBoolean,
+  OAUTH_STATE_TTL_SECONDS: optionalInt(60, 3600, 600),
+  OAUTH_CALLBACK_MAX_AGE_SECONDS: optionalInt(60, 600, 300),
+  INGESTION_POLL_INTERVAL_MS: optionalInt(100, 60000, 1000),
+  INGESTION_STALE_LOCK_SECONDS: optionalInt(30, 86400, 300),
+  INGESTION_MAX_ATTEMPTS: optionalInt(1, 20, 5),
+  INGESTION_BATCH_SIZE: optionalInt(1, 100, 10),
+  INGESTION_BACKOFF_BASE_SECONDS: optionalInt(1, 3600, 5),
+  INGESTION_BACKOFF_MAX_SECONDS: optionalInt(1, 86400, 900),
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+  TRUST_PROXY: optionalBoolean(false),
 });
 
 export type AppConfig = {
@@ -142,7 +156,7 @@ export type AppConfig = {
 };
 
 export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
-  const parsed = configSchema.safeParse(source);
+  const parsed = configSchema(String(source.NODE_ENV ?? '')).safeParse(source);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ');
     throw new Error(`Invalid environment configuration: ${issues}`);

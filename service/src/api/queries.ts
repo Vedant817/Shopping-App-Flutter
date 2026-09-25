@@ -261,7 +261,7 @@ export async function listCustomers(
   const result = await db.execute(sql`
     select c.id, c.first_name, c.last_name, c.email, c.phone, c.company, c.city, c.province, c.country, c.state, c.avatar_url,
       c.default_address, c.raw, c.orders_count,
-       coalesce((select sum(o.total_price) from orders scoped_total
+       coalesce((select sum(scoped_total.total_price) from orders scoped_total
          where scoped_total.workspace_id = c.workspace_id and scoped_total.customer_id = c.id
            and scoped_total.currency_code = (select currency_code from workspaces where id = c.workspace_id)
            and scoped_total.cancelled_at is null), 0)::text as total_spent,
@@ -302,7 +302,7 @@ export async function getCustomerDetail(
   const result = await db.execute(sql`
     select c.id, c.first_name, c.last_name, c.email, c.phone, c.company, c.city, c.province, c.country, c.state, c.avatar_url,
       c.default_address, c.raw, c.orders_count,
-       coalesce((select sum(o.total_price) from orders scoped_total
+       coalesce((select sum(scoped_total.total_price) from orders scoped_total
          where scoped_total.workspace_id = c.workspace_id and scoped_total.customer_id = c.id
            and scoped_total.currency_code = (select currency_code from workspaces where id = c.workspace_id)
            and scoped_total.cancelled_at is null), 0)::text as total_spent,

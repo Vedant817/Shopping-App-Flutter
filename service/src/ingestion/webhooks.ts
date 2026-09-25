@@ -4,7 +4,7 @@ import type { Database } from '../db/client.js';
 import { getWorkspaceByShopDomain, markWorkspaceUninstalled, recordAuditEvent } from '../db/operations.js';
 import { upsertCustomEvent, upsertCustomer, upsertOrder, upsertProduct, upsertRefund } from '../db/upserts.js';
 import { processCustomerDataRequest, purgeUninstalledShop, redactCustomer } from './compliance.js';
-import { verifyHmacHex } from '../utils/hmac.js';
+import { verifyHmacBase64 } from '../utils/hmac.js';
 import { resolveShopifyAccess } from '../shopify/access-token.js';
 import { normalizeMyshopifyDomain } from '../shopify/domain.js';
 import { ShopifyGraphqlClient } from '../shopify/graphql-client.js';
@@ -57,7 +57,7 @@ export type WebhookResource = CanonicalResource | 'product_delete' | 'customer_d
 export type WebhookRefetcher = (resource: CanonicalResource, stableId: string, shopDomain: string) => Promise<Record<string, unknown>>;
 
 export function verifyWebhookHmac(rawBody: Buffer, provided: string | undefined, secret: string): boolean {
-  return typeof provided === 'string' && verifyHmacHex(rawBody, secret, provided);
+  return typeof provided === 'string' && verifyHmacBase64(rawBody, secret, provided);
 }
 
 export function parseWebhookPayload(rawBody: Buffer): Record<string, unknown> {

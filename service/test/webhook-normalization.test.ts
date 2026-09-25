@@ -20,7 +20,7 @@ describe('Shopify webhook normalization', () => {
   it('enqueues only a stable resource reference after authenticated acceptance', async () => {
     const statements: unknown[] = [];
     const body = Buffer.from(JSON.stringify({ id: 101, title: 'REST-only title' }));
-    const hmac = createHmac('sha256', 'webhook-secret').update(body).digest('hex');
+    const hmac = createHmac('sha256', 'webhook-secret').update(body).digest('base64');
     const db = {
       execute: async (query: unknown) => { statements.push(query); return { rows: [{ id: 'workspace-1', shop_domain: 'example-shop.myshopify.com', name: 'Shop', currency_code: 'USD', time_zone: 'UTC', uninstalled_at: null }] }; },
       transaction: async (callback: (tx: unknown) => Promise<void>) => callback({ execute: async (query: unknown) => { statements.push(query); return { rows: [{ id: 'event-1' }] }; } }),

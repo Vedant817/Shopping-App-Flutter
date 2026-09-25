@@ -36,6 +36,33 @@ void main() {
       expect(config.apiBaseUrl.toString(), 'https://api.example.com/');
       expect(config.issues, isEmpty);
     });
+
+    test('allows plain HTTP only on loopback for local development', () {
+      final local = RuntimeConfig.fromValues(
+        apiBaseUrl: 'http://127.0.0.1:4599',
+        supabaseUrl: 'http://localhost:54321',
+        supabasePublishableKey: 'sb_publishable_example-key',
+        shopifyMobileReturnUrl: 'threadline://shopify/install',
+      );
+
+      expect(local.isValid, isTrue);
+      expect(local.apiBaseUrl.toString(), 'http://127.0.0.1:4599/');
+    });
+
+    test('still refuses plain HTTP against a remote host', () {
+      final remote = RuntimeConfig.fromValues(
+        apiBaseUrl: 'http://api.example.com',
+        supabaseUrl: 'https://project.supabase.co',
+        supabasePublishableKey: 'sb_publishable_example-key',
+        shopifyMobileReturnUrl: 'threadline://shopify/install',
+      );
+
+      expect(remote.isValid, isFalse);
+      expect(
+        remote.issues.map((issue) => issue.name),
+        contains(RuntimeConfig.apiBaseUrlName),
+      );
+    });
   });
 
   group('HttpCommerceRepository', () {

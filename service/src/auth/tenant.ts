@@ -52,12 +52,12 @@ export async function requireWorkspaceMembership(
       eq(workspaceMembers.workspaceId, workspaceId),
       eq(workspaceMembers.userId, authenticatedUserId),
       exists(sql`
-        select 1
-        from workspaces w
-        join shopify_installations i on i.workspace_id = w.id
-        where w.id = ${workspaceId}
-          and w.uninstalled_at is null
-          and i.uninstalled_at is null
+        (select 1
+         from workspaces w
+         join shopify_installations i on i.workspace_id = w.id
+         where w.id = ${workspaceId}
+           and w.uninstalled_at is null
+           and i.uninstalled_at is null)
       `),
     ))
     .limit(1);
