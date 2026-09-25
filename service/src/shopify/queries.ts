@@ -53,41 +53,66 @@ export const PRODUCT_VARIANTS_QUERY = `#graphql
   }
 `;
 
+const CUSTOMER_FIELDS = `
+  id
+  defaultEmailAddress { emailAddress }
+  firstName
+  lastName
+  defaultPhoneNumber { phoneNumber }
+  state
+  verifiedEmail
+  numberOfOrders
+  amountSpent { amount currencyCode }
+  image { url }
+  createdAt
+  updatedAt
+  defaultAddress {
+    company
+    address1
+    address2
+    city
+    province
+    provinceCode
+    country
+    countryCodeV2
+    zip
+    phone
+  }
+`;
+
 export const CUSTOMERS_QUERY = `#graphql
   query BackendCustomers($first: Int!, $after: String, $query: String) {
     customers(first: $first, after: $after, query: $query, sortKey: UPDATED_AT, reverse: true) {
       edges {
         cursor
         node {
-          id
-          email
-          firstName
-          lastName
-          phone
-          state
-          verifiedEmail
-          ordersCount
-          totalSpent
-          avatarUrl
-          createdAt
-          updatedAt
-          defaultAddress {
-            company
-            address1
-            address2
-            city
-            province
-            provinceCode
-            country
-            countryCodeV2
-            zip
-            phone
-          }
+          ${CUSTOMER_FIELDS}
         }
       }
       pageInfo { hasNextPage endCursor }
     }
   }
+`;
+
+const ORDER_FIELDS = `
+  id
+  name
+  number
+  email
+  displayFinancialStatus
+  displayFulfillmentStatus
+  currencyCode
+  subtotalPriceSet { shopMoney { amount currencyCode } }
+  totalDiscountsSet { shopMoney { amount currencyCode } }
+  totalTaxSet { shopMoney { amount currencyCode } }
+  totalPriceSet { shopMoney { amount currencyCode } }
+  subtotalLineItemsQuantity
+  sourceName
+  processedAt
+  createdAt
+  updatedAt
+  cancelledAt
+  customer { id }
 `;
 
 export const ORDERS_QUERY = `#graphql
@@ -96,27 +121,18 @@ export const ORDERS_QUERY = `#graphql
       edges {
         cursor
         node {
-          id
-          name
-          orderNumber
-          email
-          financialStatus
-          fulfillmentStatus
-          currencyCode
-          subtotalPrice
-          totalDiscounts
-          totalTax
-          totalPrice
-          totalUnits
-          sourceName
-          processedAt
-          createdAt
-           updatedAt
-           cancelledAt
-           customer { id }
-         }
-       }
-       pageInfo { hasNextPage endCursor }
+          ${ORDER_FIELDS}
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+
+export const ORDER_BY_ID_QUERY = `#graphql
+  query BackendOrderById($id: ID!) {
+    order(id: $id) {
+      ${ORDER_FIELDS}
     }
   }
 `;
@@ -131,9 +147,10 @@ export const ORDER_LINE_ITEMS_QUERY = `#graphql
           variantTitle
           sku
           quantity
-          originalUnitPrice
-          totalDiscount
-          totalPrice
+          originalUnitPriceSet { shopMoney { amount currencyCode } }
+          totalDiscountSet { shopMoney { amount currencyCode } }
+          discountedTotalSet { shopMoney { amount currencyCode } }
+          originalTotalSet { shopMoney { amount currencyCode } }
           product { id }
           variant { id }
         }
@@ -168,117 +185,63 @@ export const PRODUCT_BY_ID_QUERY = `#graphql
 export const CUSTOMER_BY_ID_QUERY = `#graphql
   query BackendCustomerById($id: ID!) {
     customer(id: $id) {
-      id
-      email
-      firstName
-      lastName
-      phone
-      state
-      verifiedEmail
-      ordersCount
-      totalSpent
-      avatarUrl
-      createdAt
-      updatedAt
-      defaultAddress {
-        company
-        address1
-        address2
-        city
-        province
-        provinceCode
-        country
-        countryCodeV2
-        zip
-        phone
-      }
+      ${CUSTOMER_FIELDS}
     }
   }
 `;
 
-export const CART_LINE_ITEMS_QUERY = `#graphql
-  query BackendCartLineItems($cartId: ID!, $first: Int!, $after: String) {
-    cart(id: $cartId) {
-      lines(first: $first, after: $after) {
-        nodes {
+export const ABANDONED_CHECKOUTS_QUERY = `#graphql
+  query BackendAbandonedCheckouts($first: Int!, $after: String, $query: String) {
+    abandonedCheckouts(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+      edges {
+        cursor
+        node {
           id
-          quantity
-          cost {
-            amountPerQuantity { amount currencyCode }
-            totalAmount { amount currencyCode }
-          }
-          merchandise {
-            ... on ProductVariant {
+          createdAt
+          updatedAt
+          completedAt
+          totalPriceSet { shopMoney { amount currencyCode } }
+          subtotalPriceSet { shopMoney { amount currencyCode } }
+          customer { id defaultEmailAddress { emailAddress } }
+          lineItems(first: 100) {
+            nodes {
               id
               title
+              variantTitle
               sku
-              price
+              quantity
+              originalUnitPriceSet { shopMoney { amount currencyCode } }
+              discountedTotalPriceSet { shopMoney { amount currencyCode } }
               product { id }
+              variant { id }
             }
+            pageInfo { hasNextPage endCursor }
           }
         }
-        pageInfo { hasNextPage endCursor }
       }
+      pageInfo { hasNextPage endCursor }
     }
   }
 `;
 
-export const ORDER_BY_ID_QUERY = `#graphql
-  query BackendOrderById($id: ID!) {
-    order(id: $id) {
-      id
-      name
-      orderNumber
-      email
-      financialStatus
-      fulfillmentStatus
-      currencyCode
-      subtotalPrice
-      totalDiscounts
-      totalTax
-      totalPrice
-      totalUnits
-      sourceName
-      processedAt
-      createdAt
-      updatedAt
-      cancelledAt
-      customer { id }
-    }
-  }
-`;
-
-export const CART_BY_ID_QUERY = `#graphql
-  query BackendCartById($id: ID!) {
-    cart(id: $id) {
-      id
-      createdAt
-      updatedAt
-      completedAt
-      totalQuantity
-      customer { id }
-      cost {
-        subtotalAmount { amount currencyCode }
-        totalAmount { amount currencyCode }
-      }
-    }
-  }
-`;
-
-export const CHECKOUT_BY_ID_QUERY = `#graphql
-  query BackendCheckoutById($id: ID!) {
-    checkout(id: $id) {
-      id
-      createdAt
-      updatedAt
-      completedAt
-      email
-      totalQuantity
-      customer { id }
-      cart { id }
-      cost {
-        subtotalAmount { amount currencyCode }
-        totalAmount { amount currencyCode }
+export const ABANDONED_CHECKOUT_LINES_QUERY = `#graphql
+  query BackendAbandonedCheckoutLines($id: ID!, $first: Int!, $after: String) {
+    node(id: $id) {
+      ... on AbandonedCheckout {
+        lineItems(first: $first, after: $after) {
+          nodes {
+            id
+            title
+            variantTitle
+            sku
+            quantity
+            originalUnitPriceSet { shopMoney { amount currencyCode } }
+            discountedTotalPriceSet { shopMoney { amount currencyCode } }
+            product { id }
+            variant { id }
+          }
+          pageInfo { hasNextPage endCursor }
+        }
       }
     }
   }
@@ -286,62 +249,19 @@ export const CHECKOUT_BY_ID_QUERY = `#graphql
 
 export const REFUND_BY_ID_QUERY = `#graphql
   query BackendRefundById($id: ID!) {
-    refund(id: $id) {
-      id
-      note
-      totalAmount { amount currencyCode }
-      processedAt
-      createdAt
-      updatedAt
-      order { id currencyCode }
-    }
-  }
-`;
-
-export const CARTS_QUERY = `#graphql
-  query BackendCarts($first: Int!, $after: String, $query: String) {
-    carts(first: $first, after: $after, query: $query) {
-      edges {
-        cursor
-        node {
-          id
-          createdAt
-          updatedAt
-          completedAt
-          totalQuantity
-          customer { id }
-          cost {
-            subtotalAmount { amount currencyCode }
-            totalAmount { amount currencyCode }
-          }
+    node(id: $id) {
+      ... on Refund {
+        id
+        note
+        totalRefundedSet {
+          shopMoney { amount currencyCode }
+          presentmentMoney { amount currencyCode }
         }
+        processedAt
+        createdAt
+        updatedAt
+        order { id currencyCode }
       }
-      pageInfo { hasNextPage endCursor }
-    }
-  }
-`;
-
-export const CHECKOUTS_QUERY = `#graphql
-  query BackendCheckouts($first: Int!, $after: String, $query: String) {
-    checkouts(first: $first, after: $after, query: $query, sortKey: UPDATED_AT, reverse: true) {
-      edges {
-        cursor
-        node {
-          id
-          createdAt
-          updatedAt
-          completedAt
-          email
-          totalQuantity
-          customer { id }
-          cart { id }
-          cost {
-            subtotalAmount { amount currencyCode }
-            totalAmount { amount currencyCode }
-          }
-        }
-      }
-      pageInfo { hasNextPage endCursor }
     }
   }
 `;

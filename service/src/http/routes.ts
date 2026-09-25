@@ -45,7 +45,7 @@ const optionalCustomerSearch = z.preprocess((value) => value === '' ? undefined 
 const productListQuery = listQuery.extend({ q: optionalProductSearch, category: optionalCategory });
 const customerListQuery = listQuery.extend({ q: optionalCustomerSearch });
 const orderListQuery = listQuery.extend({ customerId: z.string().min(1).max(256).optional(), includeCancelled: optionalBooleanQuery });
-const syncBody = z.object({ resources: z.array(z.enum(['products', 'customers', 'orders', 'carts', 'checkouts'])).min(1).max(5).optional() });
+const syncBody = z.object({ resources: z.array(z.enum(['products', 'customers', 'orders', 'abandoned_checkouts'])).min(1).max(4).optional() });
 const memberRoleSchema = z.enum(['owner', 'admin', 'member', 'viewer']);
 const memberBody = z.object({ userId: z.string().min(1).max(256), role: memberRoleSchema });
 const memberRoleBody = z.object({ role: memberRoleSchema });
@@ -134,7 +134,7 @@ export async function registerRoutes(app: FastifyInstance, dependencies: RouteDe
       await ensureAppUser(db, state.userId);
       const membershipAdded = await addWorkspaceMember(db, workspaceId, state.userId, 'owner');
       await recordAuditEvent(db, { workspaceId, actorUserId: state.userId, action: membershipAdded ? 'shopify.installed' : 'shopify.reinstalled', resourceType: 'workspace', resourceId: workspaceId, metadata: { shopDomain: callback.shopDomain, apiVersion: config.shopifyApiVersion, membershipAdded } });
-      await enqueueJob(db, { workspaceId, resource: 'full_sync', idempotencyKey: `install:${workspaceId}:${randomUUID()}`, maxAttempts: config.ingestionMaxAttempts, payload: { resources: ['products', 'customers', 'orders', 'carts', 'checkouts'] } });
+      await enqueueJob(db, { workspaceId, resource: 'full_sync', idempotencyKey: `install:${workspaceId}:${randomUUID()}`, maxAttempts: config.ingestionMaxAttempts, payload: { resources: ['products', 'customers', 'orders', 'abandoned_checkouts'] } });
       if (acceptsJson(request)) {
         const workspace = await getWorkspaceDto(db, workspaceId, state.userId);
         if (!workspace) throw notFound('Workspace was not found');
@@ -312,7 +312,7 @@ export async function registerRoutes(app: FastifyInstance, dependencies: RouteDe
     const user = requireAuth(request);
     await requireWorkspaceMembership(db, user.id, workspaceId, ['owner', 'admin']);
     const body = syncBody.parse(request.body ?? {});
-    const resources = body.resources ?? ['products', 'customers', 'orders', 'carts', 'checkouts'];
+    const resources = body.resources ?? ['products', 'customers', 'orders', 'abandoned_checkouts'];
     const result = await enqueueJob(db, { workspaceId, resource: 'full_sync', idempotencyKey: idempotencyKey(request, `manual-sync:${workspaceId}`), maxAttempts: config.ingestionMaxAttempts, payload: { resources } });
     await recordAuditEvent(db, { workspaceId, actorUserId: user.id, action: 'sync.enqueued', resourceType: 'ingestion_job', resourceId: result.job.id, metadata: { resources }, requestId: request.id });
     return reply.code(result.inserted ? 202 : 200).send({ jobId: result.job.id, status: result.job.status, duplicate: !result.inserted });
@@ -426,7 +426,7 @@ export async function registerRoutes(app: FastifyInstance, dependencies: RouteDe
     const user = requireAuth(request);
     await requireWorkspaceMembership(db, user.id, tenantId, ['owner', 'admin']);
     const body = syncBody.parse(request.body ?? {});
-    const resources = body.resources ?? ['products', 'customers', 'orders', 'carts', 'checkouts'];
+    const resources = body.resources ?? ['products', 'customers', 'orders', 'abandoned_checkouts'];
     const result = await enqueueJob(db, { workspaceId: tenantId, resource: 'full_sync', idempotencyKey: idempotencyKey(request, `manual-sync:${tenantId}`), maxAttempts: config.ingestionMaxAttempts, payload: { resources } });
     await recordAuditEvent(db, { workspaceId: tenantId, actorUserId: user.id, action: 'sync.enqueued', resourceType: 'ingestion_job', resourceId: result.job.id, metadata: { resources }, requestId: request.id });
     return reply.code(result.inserted ? 202 : 200).send({ jobId: result.job.id, status: result.job.status, duplicate: !result.inserted });

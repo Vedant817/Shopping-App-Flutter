@@ -3,13 +3,13 @@ import type { AppConfig } from '../config/env.js';
 import { decryptToken } from '../crypto/token-vault.js';
 import type { Database } from '../db/client.js';
 import { getInstallation, getWorkspaceByShopDomain, markWorkspaceUninstalled, recordAuditEvent } from '../db/operations.js';
-import { upsertCart, upsertCheckout, upsertCustomEvent, upsertCustomer, upsertOrder, upsertProduct, upsertRefund } from '../db/upserts.js';
+import { upsertCustomEvent, upsertCustomer, upsertOrder, upsertProduct, upsertRefund } from '../db/upserts.js';
 import { processCustomerDataRequest, purgeUninstalledShop, redactCustomer } from './compliance.js';
 import { verifyHmacHex } from '../utils/hmac.js';
 import { normalizeMyshopifyDomain } from '../shopify/domain.js';
 import { ShopifyGraphqlClient } from '../shopify/graphql-client.js';
-import { CART_BY_ID_QUERY, CHECKOUT_BY_ID_QUERY, CUSTOMER_BY_ID_QUERY, ORDER_BY_ID_QUERY, PRODUCT_BY_ID_QUERY, REFUND_BY_ID_QUERY } from '../shopify/queries.js';
-import { fetchCompleteCartLines, fetchCompleteOrderLines, fetchCompleteProductVariants } from '../shopify/sync.js';
+import { CUSTOMER_BY_ID_QUERY, ORDER_BY_ID_QUERY, PRODUCT_BY_ID_QUERY, REFUND_BY_ID_QUERY } from '../shopify/queries.js';
+import { fetchCompleteOrderLines, fetchCompleteProductVariants } from '../shopify/sync.js';
 
 export const SHOPIFY_WEBHOOK_TOPICS = new Set([
   'app/uninstalled',
@@ -29,11 +29,6 @@ export const SHOPIFY_WEBHOOK_TOPICS = new Set([
   'products/create',
   'products/update',
   'products/delete',
-  'carts/create',
-  'carts/update',
-  'checkouts/create',
-  'checkouts/update',
-  'checkouts/complete',
   'events/create',
   'custom_events/create',
 ]);
@@ -56,7 +51,7 @@ export type AcceptedWebhook = {
   jobId?: string;
 };
 
-export type CanonicalResource = 'product' | 'customer' | 'order' | 'refund' | 'cart' | 'checkout';
+export type CanonicalResource = 'product' | 'customer' | 'order' | 'refund';
 export type WebhookResource = CanonicalResource | 'product_delete' | 'customer_delete' | 'compliance' | 'uninstall' | 'custom_event';
 
 export type WebhookRefetcher = (resource: CanonicalResource, stableId: string, shopDomain: string) => Promise<Record<string, unknown>>;
@@ -144,8 +139,6 @@ export async function processWebhookJob(db: Database, workspaceId: string, paylo
       else if (resource === 'customer') await upsertCustomer(db, workspaceId, node);
       else if (resource === 'order') await upsertOrder(db, workspaceId, node, { replaceLines: true });
       else if (resource === 'refund') await upsertRefund(db, workspaceId, node);
-      else if (resource === 'cart') await upsertCart(db, workspaceId, node, { replaceLines: true });
-      else if (resource === 'checkout') await upsertCheckout(db, workspaceId, node);
       else throw new Error(`Unsupported canonical webhook resource: ${resource}`);
     }
     await db.execute(sql`update webhook_events set status = 'processed', processed_at = now() where webhook_id = ${webhookId}`);
@@ -186,13 +179,9 @@ async function fetchCanonicalResource(db: Database, config: AppConfig | undefine
     const lineItems = await fetchCompleteOrderLines(client, stableId);
     return { ...node, lineItems: { nodes: lineItems } };
   }
-  if (resource === 'refund') return fetchNode(client, REFUND_BY_ID_QUERY, 'refund', stableId);
-  if (resource === 'cart') {
-    const node = await fetchNode(client, CART_BY_ID_QUERY, 'cart', stableId);
-    const lines = await fetchCompleteCartLines(client, stableId);
-    return { ...node, lines: { nodes: lines } };
-  }
-  return fetchNode(client, CHECKOUT_BY_ID_QUERY, 'checkout', stableId);
+  const data = await client.execute<{ node?: Record<string, unknown> }>(REFUND_BY_ID_QUERY, { id: stableId });
+  if (!data.node || typeof data.node !== 'object') throw new Error('Canonical refund was not found');
+  return data.node;
 }
 
 async function fetchNode(client: ShopifyGraphqlClient, query: string, key: string, stableId: string): Promise<Record<string, unknown>> {
@@ -240,8 +229,6 @@ export function normalizeWebhook(topic: string, body: Record<string, unknown>, w
   if (topic.startsWith('customers/')) return { resource: topic === 'customers/delete' ? 'customer_delete' : 'customer', stableId: canonicalResourceId('Customer', 'customer.id', body.id, body.customer_id), action: topic };
   if (topic === 'refunds/create') return { resource: 'refund', stableId: canonicalResourceId('Refund', 'refund.id', body.id, body.refund_id, nestedId(body.refund)), action: topic };
   if (topic.startsWith('orders/')) return { resource: 'order', stableId: canonicalResourceId('Order', 'order.id', body.id, body.order_id, nestedId(body.order)), action: topic };
-  if (topic.startsWith('carts/')) return { resource: 'cart', stableId: canonicalResourceId('Cart', 'cart.id', body.id, body.cart_id), action: topic };
-  if (topic.startsWith('checkouts/')) return { resource: 'checkout', stableId: canonicalResourceId('Checkout', 'checkout.id', body.id, body.checkout_id, nestedId(body.checkout)), action: topic };
   if (topic === 'events/create' || topic === 'custom_events/create') return { resource: 'custom_event', stableId: firstIdentifier(body.id, body.event_id) ?? webhookId, action: topic };
   throw new Error('Webhook topic is not accepted');
 }

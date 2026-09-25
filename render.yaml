@@ -12,7 +12,7 @@ envVarGroups:
       - key: SUPABASE_JWT_AUDIENCE
         value: authenticated
       - key: SHOPIFY_API_VERSION
-        value: "2026-01"
+        value: "2026-07"
       - key: OAUTH_STATE_TTL_SECONDS
         value: "600"
       - key: OAUTH_CALLBACK_MAX_AGE_SECONDS

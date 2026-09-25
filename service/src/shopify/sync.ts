@@ -3,12 +3,12 @@ import type { AppConfig } from '../config/env.js';
 import { decryptToken } from '../crypto/token-vault.js';
 import type { Database } from '../db/client.js';
 import { getInstallation } from '../db/operations.js';
-import { upsertCartWithExecutor, upsertCheckoutWithExecutor, upsertCustomerWithExecutor, upsertOrderWithExecutor, upsertProductWithExecutor } from '../db/upserts.js';
+import { upsertCheckoutWithExecutor, upsertCustomerWithExecutor, upsertOrderWithExecutor, upsertProductWithExecutor } from '../db/upserts.js';
 import { updateJobResourcePage } from '../ingestion/queue.js';
 import { ShopifyGraphqlClient, type GraphqlConnection, type GraphqlPage } from './graphql-client.js';
-import { CARTS_QUERY, CART_LINE_ITEMS_QUERY, CHECKOUTS_QUERY, CUSTOMERS_QUERY, ORDERS_QUERY, ORDER_LINE_ITEMS_QUERY, PRODUCTS_QUERY, PRODUCT_VARIANTS_QUERY } from './queries.js';
+import { ABANDONED_CHECKOUTS_QUERY, ABANDONED_CHECKOUT_LINES_QUERY, CUSTOMERS_QUERY, ORDERS_QUERY, ORDER_LINE_ITEMS_QUERY, PRODUCTS_QUERY, PRODUCT_VARIANTS_QUERY } from './queries.js';
 
-export type SyncResource = 'products' | 'customers' | 'orders' | 'carts' | 'checkouts';
+export type SyncResource = 'products' | 'customers' | 'orders' | 'abandoned_checkouts';
 
 type SqlExecutor = Pick<Database, 'execute'>;
 
@@ -55,7 +55,7 @@ export async function commitSyncPage(
   await db.transaction(async (tx) => {
     const persistedCursor = input.hasNextPage === false ? null : input.cursor;
     for (const node of input.nodes) {
-      await upsert(tx, input.workspaceId, node, { replaceVariants: input.resource === 'products', replaceLines: input.resource === 'orders' || input.resource === 'carts' });
+      await upsert(tx, input.workspaceId, node, { replaceVariants: input.resource === 'products', replaceLines: input.resource === 'orders' });
     }
     await saveSyncCursor(tx, input.workspaceId, input.resource, persistedCursor);
     await updateSyncRunPage(tx, input.runId, persistedCursor, input.count);
@@ -109,26 +109,26 @@ async function attachCompleteOrderLines(client: SyncClient, nodes: unknown[]): P
   return enriched;
 }
 
-export async function fetchCompleteCartLines(client: SyncClient, cartId: string): Promise<unknown[]> {
+export async function fetchCompleteAbandonedCheckoutLines(client: SyncClient, checkoutId: string): Promise<unknown[]> {
   const lines: unknown[] = [];
-  await client.forEachPage(CART_LINE_ITEMS_QUERY, { cartId, first: pageSize, after: null }, (data) => {
-    const cart = (data as { cart?: { lines?: GraphqlConnection<unknown> } }).cart;
-    if (!cart?.lines) throw new Error('Shopify cart lines are unavailable');
-    return cart.lines;
+  await client.forEachPage(ABANDONED_CHECKOUT_LINES_QUERY, { id: checkoutId, first: pageSize, after: null }, (data) => {
+    const checkout = (data as { node?: { lineItems?: GraphqlConnection<unknown> } }).node;
+    if (!checkout?.lineItems) throw new Error('Shopify abandoned checkout lines are unavailable');
+    return checkout.lineItems;
   }, async (page: GraphqlPage<unknown>) => {
     lines.push(...page.nodes);
   });
   return lines;
 }
 
-async function attachCompleteCartLines(client: SyncClient, nodes: unknown[]): Promise<unknown[]> {
+async function attachCompleteAbandonedCheckoutLines(client: SyncClient, nodes: unknown[]): Promise<unknown[]> {
   const enriched: unknown[] = [];
   for (const value of nodes) {
     const node = value as Record<string, unknown>;
-    const cartId = typeof node.id === 'string' ? node.id : '';
-    if (!cartId) throw new Error('Cart id is required for line reconciliation');
-    const lines = await fetchCompleteCartLines(client, cartId);
-    enriched.push({ ...node, lines: { nodes: lines } });
+    const checkoutId = typeof node.id === 'string' ? node.id : '';
+    if (!checkoutId) throw new Error('Abandoned checkout id is required for line reconciliation');
+    const lineItems = await fetchCompleteAbandonedCheckoutLines(client, checkoutId);
+    enriched.push({ ...node, lineItems: { nodes: lineItems } });
   }
   return enriched;
 }
@@ -159,11 +159,11 @@ export async function runSyncResource(
     await client.forEachPage(page.query, variables, (data) => page.select(data), async (result) => {
       const nodes = resource === 'products'
         ? await attachCompleteProductVariants(client, result.nodes)
-        : resource === 'orders'
-          ? await attachCompleteOrderLines(client, result.nodes)
-          : resource === 'carts'
-            ? await attachCompleteCartLines(client, result.nodes)
-            : result.nodes;
+          : resource === 'orders'
+            ? await attachCompleteOrderLines(client, result.nodes)
+            : resource === 'abandoned_checkouts'
+              ? await attachCompleteAbandonedCheckoutLines(client, result.nodes)
+              : result.nodes;
       const nextCursor = result.endCursor ?? lastCursor;
       await commitSyncPage(db, {
         runId: run,
@@ -305,18 +305,14 @@ function syncPage(resource: SyncResource): SyncPage {
       upsert: upsertOrderWithExecutor,
     };
   }
-  if (resource === 'carts') {
+  if (resource === 'abandoned_checkouts') {
     return {
-      query: CARTS_QUERY,
-      select: (data) => (data as { carts: GraphqlConnection<unknown> }).carts,
-      upsert: upsertCartWithExecutor,
+      query: ABANDONED_CHECKOUTS_QUERY,
+      select: (data) => (data as { abandonedCheckouts: GraphqlConnection<unknown> }).abandonedCheckouts,
+      upsert: upsertCheckoutWithExecutor,
     };
   }
-  return {
-    query: CHECKOUTS_QUERY,
-    select: (data) => (data as { checkouts: GraphqlConnection<unknown> }).checkouts,
-    upsert: upsertCheckoutWithExecutor,
-  };
+  throw new Error('Unsupported sync resource');
 }
 
 async function updateSyncRunPage(executor: SqlExecutor, runId: string, cursor: string | null, count: number): Promise<void> {

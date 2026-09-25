@@ -84,9 +84,14 @@ export async function upsertCustomerWithExecutor(db: SqlExecutor, workspaceId: s
   const city = optionalString(address?.city);
   const province = optionalString(address?.province) ?? optionalString(address?.provinceCode) ?? optionalString(node.state);
   const country = optionalString(address?.country) ?? optionalString(address?.countryCode);
+  const ordersCount = optionalInteger(node.numberOfOrders ?? node.ordersCount);
+  const totalSpent = nullableMoney(node.amountSpent ?? node.totalSpent);
+  const avatarUrl = optionalString(node.avatarUrl) ?? optionalString(optionalRecord(node.image)?.url);
+  const email = optionalString(optionalRecord(node.defaultEmailAddress)?.emailAddress) ?? optionalString(node.email);
+  const phone = optionalString(optionalRecord(node.defaultPhoneNumber)?.phoneNumber) ?? optionalString(node.phone);
   await db.execute(sql`
     insert into customers (workspace_id, id, email, first_name, last_name, phone, company, city, province, country, state, verified_email, orders_count, total_spent, default_address, avatar_url, shopify_created_at, shopify_updated_at, raw)
-    values (${workspaceId}, ${id}, ${optionalString(node.email)}, ${optionalString(node.firstName)}, ${optionalString(node.lastName)}, ${optionalString(node.phone)}, ${company}, ${city}, ${province}, ${country}, ${optionalString(node.state)}, ${nullableBoolean(node.verifiedEmail)}, ${optionalInteger(node.ordersCount) ?? null}, ${nullableMoney(node.totalSpent)}, ${address ? JSON.stringify(address) : null}::jsonb, ${optionalString(node.avatarUrl)}, ${optionalDate(node.createdAt)}, ${optionalDate(node.updatedAt)}, ${JSON.stringify(node)}::jsonb)
+    values (${workspaceId}, ${id}, ${email}, ${optionalString(node.firstName)}, ${optionalString(node.lastName)}, ${phone}, ${company}, ${city}, ${province}, ${country}, ${optionalString(node.state)}, ${nullableBoolean(node.verifiedEmail)}, ${ordersCount ?? null}, ${totalSpent}, ${address ? JSON.stringify(address) : null}::jsonb, ${avatarUrl}, ${optionalDate(node.createdAt)}, ${optionalDate(node.updatedAt)}, ${JSON.stringify(node)}::jsonb)
     on conflict (workspace_id, id) do update set
       email = excluded.email, first_name = excluded.first_name, last_name = excluded.last_name,
       phone = excluded.phone, company = excluded.company, city = excluded.city,
@@ -113,11 +118,16 @@ export async function upsertOrderWithExecutor(tx: SqlExecutor, workspaceId: stri
   const id = requiredString(node.id, 'order.id');
   const customer = optionalRecord(node.customer);
   const lineItems = connectionNodes(node.lineItems);
-  const totalUnits = optionalInteger(node.totalUnits) ?? lineItems.reduce((sum: number, item) => sum + (optionalInteger(record(item, 'order.line').quantity) ?? 0), 0);
+  const totalUnits = optionalInteger(node.subtotalLineItemsQuantity ?? node.totalUnits) ?? lineItems.reduce((sum: number, item) => sum + (optionalInteger(record(item, 'order.line').quantity) ?? 0), 0);
+  const orderNumber = optionalInteger(node.orderNumber ?? node.number);
+  const financialStatus = optionalString(node.displayFinancialStatus ?? node.financialStatus);
+  const fulfillmentStatus = optionalString(node.displayFulfillmentStatus ?? node.fulfillmentStatus);
+  const totalPriceSet = optionalRecord(node.totalPriceSet);
+  const currencyCode = requiredString(node.currencyCode ?? optionalRecord(totalPriceSet?.shopMoney)?.currencyCode, 'order.currencyCode');
   const raw = JSON.stringify(node);
   await tx.execute(sql`
       insert into orders (workspace_id, id, name, order_number, customer_id, email, financial_status, fulfillment_status, currency_code, subtotal_price, total_discounts, total_tax, total_price, total_units, source_name, raw, processed_at, shopify_created_at, shopify_updated_at, cancelled_at)
-      values (${workspaceId}, ${id}, ${optionalString(node.name)}, ${optionalInteger(node.orderNumber) ?? null}, ${optionalString(customer?.id)}, ${optionalString(node.email)}, ${optionalString(node.financialStatus)}, ${optionalString(node.fulfillmentStatus)}, ${requiredString(node.currencyCode, 'order.currencyCode')}, ${parseMoney(node.subtotalPrice, 'order.subtotalPrice')}, ${parseMoney(node.totalDiscounts, 'order.totalDiscounts')}, ${parseMoney(node.totalTax, 'order.totalTax')}, ${parseMoney(node.totalPrice, 'order.totalPrice')}, ${totalUnits}, ${optionalString(node.sourceName)}, ${raw}::jsonb, ${optionalDate(node.processedAt)}, ${optionalDate(node.createdAt)}, ${optionalDate(node.updatedAt)}, ${optionalDate(node.cancelledAt)})
+      values (${workspaceId}, ${id}, ${optionalString(node.name)}, ${orderNumber ?? null}, ${optionalString(customer?.id)}, ${optionalString(node.email)}, ${financialStatus}, ${fulfillmentStatus}, ${currencyCode}, ${parseMoney(node.subtotalPriceSet ?? node.subtotalPrice, 'order.subtotalPriceSet')}, ${parseMoney(node.totalDiscountsSet ?? node.totalDiscounts, 'order.totalDiscountsSet')}, ${parseMoney(node.totalTaxSet ?? node.totalTax, 'order.totalTaxSet')}, ${parseMoney(node.totalPriceSet ?? node.totalPrice, 'order.totalPriceSet')}, ${totalUnits}, ${optionalString(node.sourceName)}, ${raw}::jsonb, ${optionalDate(node.processedAt)}, ${optionalDate(node.createdAt)}, ${optionalDate(node.updatedAt)}, ${optionalDate(node.cancelledAt)})
       on conflict (workspace_id, id) do update set
         name = excluded.name, order_number = excluded.order_number, customer_id = excluded.customer_id,
         email = excluded.email, financial_status = excluded.financial_status,
@@ -134,9 +144,12 @@ export async function upsertOrderWithExecutor(tx: SqlExecutor, workspaceId: stri
       const lineId = requiredString(line.id, 'order.line.id');
       const product = optionalRecord(line.product);
       const variant = optionalRecord(line.variant);
+      const unitPrice = line.originalUnitPriceSet ?? line.originalUnitPrice ?? line.unitPrice;
+      const totalPrice = line.discountedTotalSet ?? line.discountedTotalPriceSet ?? line.totalPrice;
+      const totalDiscount = line.totalDiscountSet ?? line.totalDiscount ?? '0';
       await tx.execute(sql`
         insert into order_lines (workspace_id, order_id, id, product_id, variant_id, title, variant_title, sku, quantity, unit_price, total_discount, total_price, raw)
-        values (${workspaceId}, ${id}, ${lineId}, ${optionalString(product?.id)}, ${optionalString(variant?.id)}, ${requiredString(line.title, 'order.line.title')}, ${optionalString(line.variantTitle)}, ${optionalString(line.sku)}, ${requiredInteger(line.quantity, 'order.line.quantity')}, ${parseMoney(line.originalUnitPrice ?? line.unitPrice, 'order.line.unitPrice')}, ${parseMoney(line.totalDiscount, 'order.line.totalDiscount')}, ${parseMoney(line.totalPrice, 'order.line.totalPrice')}, ${JSON.stringify(line)}::jsonb)
+        values (${workspaceId}, ${id}, ${lineId}, ${optionalString(product?.id)}, ${optionalString(variant?.id)}, ${requiredString(line.title, 'order.line.title')}, ${optionalString(line.variantTitle)}, ${optionalString(line.sku)}, ${requiredInteger(line.quantity, 'order.line.quantity')}, ${parseMoney(unitPrice, 'order.line.unitPrice')}, ${parseMoney(totalDiscount, 'order.line.totalDiscount')}, ${parseMoney(totalPrice, 'order.line.totalPrice')}, ${JSON.stringify(line)}::jsonb)
         on conflict (workspace_id, order_id, id) do update set
           product_id = excluded.product_id, variant_id = excluded.variant_id, title = excluded.title,
           variant_title = excluded.variant_title, sku = excluded.sku, quantity = excluded.quantity,
@@ -152,9 +165,11 @@ export async function upsertRefund(db: Database, workspaceId: string, value: unk
   const id = requiredString(node.id, 'refund.id');
   const order = optionalRecord(node.order);
   const orderId = requiredString(order?.id ?? node.orderId, 'refund.orderId');
-  const total = node.totalAmount ?? node.amount;
-  const amount = parseMoney(optionalRecord(total)?.amount ?? total, 'refund.totalAmount');
-  const currency = requiredString(node.currencyCode ?? optionalRecord(total)?.currencyCode ?? order?.currencyCode, 'refund.currencyCode');
+  const total = node.totalRefundedSet ?? node.totalAmount ?? node.amount;
+  const totalRecord = optionalRecord(total);
+  const shopMoney = optionalRecord(totalRecord?.shopMoney) ?? totalRecord;
+  const amount = parseMoney(shopMoney?.amount ?? total, 'refund.totalRefundedSet');
+  const currency = requiredString(node.currencyCode ?? shopMoney?.currencyCode ?? order?.currencyCode, 'refund.currencyCode');
   await db.execute(sql`
     insert into refunds (workspace_id, id, order_id, note, total_amount, currency_code, processed_at, shopify_created_at, shopify_updated_at, raw)
     values (${workspaceId}, ${id}, ${orderId}, ${optionalString(node.note)}, ${amount}, ${currency}, ${optionalDate(node.processedAt)}, ${optionalDate(node.createdAt)}, ${optionalDate(node.updatedAt)}, ${JSON.stringify(node)}::jsonb)
@@ -167,70 +182,22 @@ export async function upsertRefund(db: Database, workspaceId: string, value: unk
   return id;
 }
 
-export async function upsertCart(db: Database, workspaceId: string, value: unknown, options: { replaceLines?: boolean } = {}): Promise<string> {
-  let cartId = '';
-  await db.transaction(async (tx) => {
-    cartId = await upsertCartWithExecutor(tx, workspaceId, value, options);
-  });
-  return cartId;
-}
-
-export async function upsertCartWithExecutor(tx: SqlExecutor, workspaceId: string, value: unknown, options: { replaceLines?: boolean } = {}): Promise<string> {
-  const node = record(value, 'cart');
-  const id = requiredString(node.id, 'cart.id');
-  const cost = optionalRecord(node.cost);
-  const subtotal = parseMoney(cost?.subtotalAmount, 'cart.subtotalAmount');
-  const total = parseMoney(cost?.totalAmount, 'cart.totalAmount');
-  const lines = connectionNodes(node.lines);
-  const totalQuantity = optionalInteger(node.totalQuantity) ?? lines.reduce((sum: number, lineValue) => sum + (optionalInteger(record(lineValue, 'cart.line').quantity) ?? 0), 0);
-  await tx.execute(sql`
-      insert into carts (workspace_id, id, customer_id, currency_code, total_price, subtotal_price, total_quantity, abandoned_at, completed_at, raw, shopify_updated_at)
-      values (${workspaceId}, ${id}, ${optionalString(optionalRecord(node.customer)?.id)}, ${requiredString(node.currencyCode ?? optionalRecord(cost?.totalAmount)?.currencyCode, 'cart.currencyCode')}, ${total}, ${subtotal}, ${totalQuantity}, ${optionalDate(node.abandonedAt)}, ${optionalDate(node.completedAt)}, ${JSON.stringify(node)}::jsonb, ${optionalDate(node.updatedAt)})
-      on conflict (workspace_id, id) do update set
-        customer_id = excluded.customer_id, currency_code = excluded.currency_code, total_price = excluded.total_price,
-        subtotal_price = excluded.subtotal_price, total_quantity = excluded.total_quantity,
-        abandoned_at = excluded.abandoned_at, completed_at = excluded.completed_at, raw = excluded.raw,
-        shopify_updated_at = excluded.shopify_updated_at, updated_at = now()
-    `);
-    if (options.replaceLines) await tx.execute(sql`delete from cart_lines where workspace_id = ${workspaceId} and cart_id = ${id}`);
-    for (const lineValue of lines) await upsertCartLine(tx, workspaceId, id, lineValue);
-  return id;
-}
-
-async function upsertCartLine(tx: Pick<Database, 'execute'>, workspaceId: string, cartId: string, value: unknown): Promise<void> {
-  const line = record(value, 'cart.line');
-  const id = requiredString(line.id, 'cart.line.id');
-  const merchandise = optionalRecord(line.merchandise);
-  const product = optionalRecord(merchandise?.product);
-  const cost = optionalRecord(line.cost);
-  const unit = optionalRecord(cost?.amountPerQuantity);
-  await tx.execute(sql`
-    insert into cart_lines (workspace_id, cart_id, id, product_id, variant_id, title, quantity, unit_price, total_price, raw)
-    values (${workspaceId}, ${cartId}, ${id}, ${optionalString(product?.id)}, ${optionalString(merchandise?.id)}, ${requiredString(merchandise?.title ?? line.title, 'cart.line.title')}, ${requiredInteger(line.quantity, 'cart.line.quantity')}, ${parseMoney(unit?.amount ?? cost?.totalAmount, 'cart.line.unitPrice')}, ${parseMoney(cost?.totalAmount, 'cart.line.totalPrice')}, ${JSON.stringify(line)}::jsonb)
-    on conflict (workspace_id, cart_id, id) do update set
-      product_id = excluded.product_id, variant_id = excluded.variant_id, title = excluded.title,
-      quantity = excluded.quantity, unit_price = excluded.unit_price, total_price = excluded.total_price,
-      raw = excluded.raw, updated_at = now()
-  `);
-}
-
-export async function upsertCheckout(db: Database, workspaceId: string, value: unknown): Promise<string> {
-  let checkoutId = '';
-  await db.transaction(async (tx) => {
-    checkoutId = await upsertCheckoutWithExecutor(tx, workspaceId, value);
-  });
-  return checkoutId;
-}
-
 export async function upsertCheckoutWithExecutor(db: SqlExecutor, workspaceId: string, value: unknown): Promise<string> {
-  const node = record(value, 'checkout');
-  const id = requiredString(node.id, 'checkout.id');
+  const node = record(value, 'abandonedCheckout');
+  const id = requiredString(node.id, 'abandonedCheckout.id');
   const cost = optionalRecord(node.cost);
+  const totalSet = optionalRecord(node.totalPriceSet);
+  const subtotalSet = optionalRecord(node.subtotalPriceSet);
+  const totalMoney = optionalRecord(totalSet?.shopMoney) ?? totalSet ?? optionalRecord(cost?.totalAmount);
+  const subtotalMoney = optionalRecord(subtotalSet?.shopMoney) ?? subtotalSet ?? optionalRecord(cost?.subtotalAmount);
+  const customer = optionalRecord(node.customer);
+  const customerEmail = optionalString(optionalRecord(customer?.defaultEmailAddress)?.emailAddress) ?? optionalString(customer?.email);
   const lines = connectionNodes(node.lineItems);
-  const totalQuantity = optionalInteger(node.totalQuantity) ?? lines.reduce((sum: number, lineValue) => sum + (optionalInteger(record(lineValue, 'checkout.line').quantity) ?? 0), 0);
+  const totalQuantity = lines.reduce((sum: number, lineValue) => sum + (optionalInteger(record(lineValue, 'abandonedCheckout.line').quantity) ?? 0), 0);
+  const currency = requiredString(node.currencyCode ?? totalMoney?.currencyCode ?? subtotalMoney?.currencyCode, 'abandonedCheckout.currencyCode');
   await db.execute(sql`
     insert into checkouts (workspace_id, id, cart_id, customer_id, email, currency_code, total_price, subtotal_price, total_quantity, completed_at, raw, shopify_created_at, shopify_updated_at)
-    values (${workspaceId}, ${id}, ${optionalString(optionalRecord(node.cart)?.id)}, ${optionalString(optionalRecord(node.customer)?.id)}, ${optionalString(node.email)}, ${requiredString(node.currencyCode ?? optionalRecord(cost?.totalAmount)?.currencyCode, 'checkout.currencyCode')}, ${parseMoney(cost?.totalAmount, 'checkout.totalAmount')}, ${parseMoney(cost?.subtotalAmount, 'checkout.subtotalAmount')}, ${totalQuantity}, ${optionalDate(node.completedAt)}, ${JSON.stringify(node)}::jsonb, ${optionalDate(node.createdAt)}, ${optionalDate(node.updatedAt)})
+    values (${workspaceId}, ${id}, ${optionalString(optionalRecord(node.cart)?.id)}, ${optionalString(customer?.id)}, ${optionalString(node.email ?? customerEmail)}, ${currency}, ${parseMoney(totalMoney, 'abandonedCheckout.totalPrice')}, ${parseMoney(subtotalMoney, 'abandonedCheckout.subtotalPrice')}, ${totalQuantity}, ${optionalDate(node.completedAt)}, ${JSON.stringify(node)}::jsonb, ${optionalDate(node.createdAt)}, ${optionalDate(node.updatedAt)})
     on conflict (workspace_id, id) do update set
       cart_id = excluded.cart_id, customer_id = excluded.customer_id, email = excluded.email,
       currency_code = excluded.currency_code, total_price = excluded.total_price,
@@ -325,7 +292,8 @@ function nullableMoney(value: unknown): string | null {
 function parseMoney(value: unknown, field: string): string {
   if (value === undefined || value === null || value === '') throw new Error(`${field} is required`);
   const recordValue = optionalRecord(value);
-  return normalizeMoney(recordValue?.amount ?? value, field);
+  const moneyValue = optionalRecord(recordValue?.shopMoney) ?? recordValue;
+  return normalizeMoney(moneyValue?.amount ?? value, field);
 }
 
 function connectionNodes(value: unknown): unknown[] {

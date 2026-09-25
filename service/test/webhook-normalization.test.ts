@@ -7,8 +7,6 @@ const fixtures = [
   { topic: 'customers/update', body: { id: 202, email: 'customer@example.test' }, resource: 'customer', id: '202' },
   { topic: 'orders/updated', body: { id: 303, order_number: 7, email: 'buyer@example.test' }, resource: 'order', id: '303' },
   { topic: 'refunds/create', body: { id: 404, order_id: 303, total_amount: '5.00' }, resource: 'refund', id: '404' },
-  { topic: 'carts/update', body: { id: 505, total_quantity: 1 }, resource: 'cart', id: '505' },
-  { topic: 'checkouts/update', body: { id: 606, email: 'checkout@example.test' }, resource: 'checkout', id: '606' },
 ];
 
 describe('Shopify webhook normalization', () => {
@@ -48,11 +46,7 @@ describe('Shopify webhook normalization', () => {
           ? { id, email: 'canonical@example.test' }
           : fixture.resource === 'order'
             ? { id, currencyCode: 'USD', subtotalPrice: '10', totalDiscounts: '0', totalTax: '0', totalPrice: '10', lineItems: { nodes: [] } }
-            : fixture.resource === 'refund'
-              ? { id, order: { id: '303', currencyCode: 'USD' }, totalAmount: { amount: '5', currencyCode: 'USD' } }
-              : fixture.resource === 'cart'
-                ? { id, cost: { subtotalAmount: { amount: '10', currencyCode: 'USD' }, totalAmount: { amount: '10', currencyCode: 'USD' } }, lines: { nodes: [] } }
-                : { id, cost: { subtotalAmount: { amount: '10', currencyCode: 'USD' }, totalAmount: { amount: '10', currencyCode: 'USD' } } };
+            : { id, order: { id: '303', currencyCode: 'USD' }, totalRefundedSet: { shopMoney: { amount: '5', currencyCode: 'USD' } } };
       await processWebhookJob(db as never, 'workspace-1', {
         webhookId: `hook-${id}`,
         topic: fixture.topic,
@@ -67,5 +61,10 @@ describe('Shopify webhook normalization', () => {
 
   it('rejects a refund payload without a stable refund id', () => {
     expect(() => normalizeWebhook('refunds/create', { order_id: 303 }, 'hook-1')).toThrow(/refund.id/);
+  });
+
+  it('rejects unsupported Admin cart and checkout topics', () => {
+    expect(() => normalizeWebhook('carts/update', { id: 505 }, 'hook-cart')).toThrow(/not accepted/);
+    expect(() => normalizeWebhook('checkouts/update', { id: 606 }, 'hook-checkout')).toThrow(/not accepted/);
   });
 });

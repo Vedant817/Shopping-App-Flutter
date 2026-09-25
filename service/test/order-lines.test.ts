@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fetchCompleteCartLines, fetchCompleteOrderLines } from '../src/shopify/sync.js';
+import { fetchCompleteAbandonedCheckoutLines, fetchCompleteOrderLines } from '../src/shopify/sync.js';
 import { upsertOrderWithExecutor } from '../src/db/upserts.js';
 
 describe('order line reconciliation', () => {
@@ -21,21 +21,21 @@ describe('order line reconciliation', () => {
     expect(requested[1]).toMatchObject({ orderId: 'gid://shopify/Order/1', after: 'line-cursor' });
   });
 
-  it('fetches cart lines without a nested first-page truncation', async () => {
+  it('fetches abandoned checkout lines without a nested first-page truncation', async () => {
     const requested: Array<Record<string, unknown>> = [];
     const client = {
       forEachPage: async (_query: string, variables: Record<string, unknown>, _select: unknown, onPage: (page: { nodes: unknown[]; endCursor: string | null; hasNextPage: boolean }) => Promise<void>) => {
         const first = variables.after === null;
-        requested.push({ ...variables, after: first ? null : 'cart-cursor' });
-        await onPage({ nodes: [{ id: first ? 'cart-line-1' : 'cart-line-2' }], endCursor: first ? 'cart-cursor' : null, hasNextPage: first });
+        requested.push({ ...variables, after: first ? null : 'abandoned-cursor' });
+        await onPage({ nodes: [{ id: first ? 'abandoned-line-1' : 'abandoned-line-2' }], endCursor: first ? 'abandoned-cursor' : null, hasNextPage: first });
         if (first) {
-          requested.push({ ...variables, after: 'cart-cursor' });
-          await onPage({ nodes: [{ id: 'cart-line-2' }], endCursor: null, hasNextPage: false });
+          requested.push({ ...variables, after: 'abandoned-cursor' });
+          await onPage({ nodes: [{ id: 'abandoned-line-2' }], endCursor: null, hasNextPage: false });
         }
       },
     };
-    await expect(fetchCompleteCartLines(client as never, 'gid://shopify/Cart/1')).resolves.toHaveLength(2);
-    expect(requested[1]).toMatchObject({ cartId: 'gid://shopify/Cart/1', after: 'cart-cursor' });
+    await expect(fetchCompleteAbandonedCheckoutLines(client as never, 'gid://shopify/AbandonedCheckout/1')).resolves.toHaveLength(2);
+    expect(requested[1]).toMatchObject({ id: 'gid://shopify/AbandonedCheckout/1', after: 'abandoned-cursor' });
   });
 
   it('reconciles changed orders by deleting removed lines before inserting the canonical set', async () => {

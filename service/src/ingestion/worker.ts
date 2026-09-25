@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { AppConfig } from '../config/env.js';
 import type { Database } from '../db/client.js';
-import { upsertCart, upsertCheckout, upsertCustomer, upsertOrder, upsertProduct, upsertRefund } from '../db/upserts.js';
+import { upsertCustomer, upsertOrder, upsertProduct, upsertRefund } from '../db/upserts.js';
 import { acceptCustomEvent, processWebhookJob } from './webhooks.js';
 import { claimNextJob, completeJob, failJob, failJobResource, getJobResourceStates, initializeJobResources, markJobResourcesDead, startJobResource, completeJobResource, recoverStaleJobs, type IngestionJob } from './queue.js';
 import { failStaleSyncRuns, readSyncCursor, runSyncResource, type SyncResource } from '../shopify/sync.js';
@@ -80,8 +80,8 @@ async function dispatchJob(db: Database, config: AppConfig, job: IngestionJob): 
   if (
     job.resource === 'webhook' || job.resource === 'product' || job.resource === 'product_delete' ||
     job.resource === 'customer' || job.resource === 'customer_delete' || job.resource === 'order' ||
-    job.resource === 'refund' || job.resource === 'cart' || job.resource === 'checkout' ||
-    job.resource === 'compliance' || job.resource === 'uninstall'
+     job.resource === 'refund' ||
+     job.resource === 'compliance' || job.resource === 'uninstall'
   ) {
     await processWebhookJob(db, job.workspaceId, job.payload, { config });
     return;
@@ -120,13 +120,11 @@ async function dispatchJob(db: Database, config: AppConfig, job: IngestionJob): 
   else if (job.resource === 'customer') await upsertCustomer(db, job.workspaceId, node);
   else if (job.resource === 'order') await upsertOrder(db, job.workspaceId, node);
   else if (job.resource === 'refund') await upsertRefund(db, job.workspaceId, node);
-  else if (job.resource === 'cart') await upsertCart(db, job.workspaceId, node);
-  else if (job.resource === 'checkout') await upsertCheckout(db, job.workspaceId, node);
   else throw new Error(`Unsupported ingestion resource: ${job.resource}`);
 }
 
 function isSyncResource(value: unknown): value is SyncResource {
-  return value === 'products' || value === 'customers' || value === 'orders' || value === 'carts' || value === 'checkouts';
+  return value === 'products' || value === 'customers' || value === 'orders' || value === 'abandoned_checkouts';
 }
 
 function requiredString(value: unknown, label: string): string {

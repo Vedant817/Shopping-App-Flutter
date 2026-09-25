@@ -65,8 +65,8 @@ Create a public app in the Shopify Partner dashboard and a development store for
 
 Configure the app with:
 
-- The API version supported by the service, currently configured as `2026-01` in `render.yaml`.
-- The scopes needed for the queried products, variants, customers, orders, refunds, carts, and checkouts. The service does not silently broaden scopes; review the current Shopify Partner requirements before publishing.
+- The API version supported by the service, currently configured as `2026-07` in `render.yaml`.
+- The scopes needed for the queried products, variants, customers, orders, refunds, and abandoned checkouts. The service does not silently broaden scopes; review the current Shopify Partner requirements before publishing.
 - The OAuth callback URL:
 
 ```text
@@ -85,7 +85,7 @@ threadline://shopify/install
 https://<render-service-host>/v1/webhooks/shopify
 ```
 
-Register the webhook topics accepted by the service, including the relevant product, customer, order, refund, cart, checkout, uninstall, privacy, and event topics. The exact enabled set should match the resources the app is intended to ingest. Shopify protected-customer-data approval and the production privacy/support details are required before handling real customer data.
+Register the webhook topics accepted by the service, including the relevant product topics. Customer, order, refund, privacy, and event topics require Shopify protected-customer-data approval before they can be deployed. Abandoned checkout data is collected through the Admin `abandonedCheckouts` query rather than unsupported Admin cart/checkout roots.
 
 The first successful Shopify install creates the workspace and assigns the installing Supabase user as owner. Additional members must already have a Supabase account; the member page adds an existing user by user ID.
 
@@ -215,7 +215,7 @@ Do not treat local tests as proof that external integrations work. After credent
 1. `/health/live` and `/health/ready` on Render.
 2. Supabase Email OTP delivery, verification, session restoration, and sign-out.
 3. Shopify OAuth against the development store and exact mobile deep-link return.
-4. Product, customer, order, refund, cart, and checkout sync progress and terminal state.
+4. Product, customer, order, refund, and abandoned checkout sync progress and terminal state.
 5. A signed Shopify webhook and canonical refetch.
 6. Owner/admin/member/viewer authorization and last-owner protection.
 7. App uninstall, privacy request, redaction, and shop redact handling.

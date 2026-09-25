@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
 
-export type IngestionResource = 'product' | 'product_delete' | 'customer' | 'customer_delete' | 'order' | 'refund' | 'cart' | 'checkout' | 'custom_event' | 'compliance' | 'uninstall' | 'webhook' | 'full_sync';
+export type IngestionResource = 'product' | 'product_delete' | 'customer' | 'customer_delete' | 'order' | 'refund' | 'custom_event' | 'compliance' | 'uninstall' | 'webhook' | 'full_sync';
 
 export type IngestionJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'dead';
 
