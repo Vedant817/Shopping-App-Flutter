@@ -157,6 +157,42 @@ class CustomersViewState {
   }
 }
 
+/// Abandoned checkouts, which the service ingests on every sync.
+class CheckoutsViewState {
+  const CheckoutsViewState({
+    this.status = LoadStatus.idle,
+    this.page,
+    this.isRefreshing = false,
+    this.error,
+    this.errorRequestId,
+  });
+
+  final LoadStatus status;
+  final CheckoutPageDto? page;
+  final bool isRefreshing;
+  final String? error;
+  final String? errorRequestId;
+
+  CheckoutsViewState copyWith({
+    LoadStatus? status,
+    CheckoutPageDto? page,
+    bool? isRefreshing,
+    String? error,
+    String? errorRequestId,
+    bool clearError = false,
+  }) {
+    return CheckoutsViewState(
+      status: status ?? this.status,
+      page: page ?? this.page,
+      isRefreshing: isRefreshing ?? this.isRefreshing,
+      error: clearError ? null : (error ?? this.error),
+      errorRequestId: clearError
+          ? null
+          : (errorRequestId ?? this.errorRequestId),
+    );
+  }
+}
+
 class SyncViewState {
   const SyncViewState({
     this.status = LoadStatus.idle,
@@ -314,6 +350,7 @@ class WorkspaceCache {
     this.catalog = const CatalogViewState(),
     this.customers = const CustomersViewState(),
     this.sync = const SyncViewState(),
+    this.checkouts = const CheckoutsViewState(),
     this.productDetail = const ProductDetailViewState(),
     this.customerDetail = const CustomerDetailViewState(),
     this.members = const MembersViewState(),
@@ -325,6 +362,7 @@ class WorkspaceCache {
   final CatalogViewState catalog;
   final CustomersViewState customers;
   final SyncViewState sync;
+  final CheckoutsViewState checkouts;
   final ProductDetailViewState productDetail;
   final CustomerDetailViewState customerDetail;
   final MembersViewState members;
@@ -336,6 +374,7 @@ class WorkspaceCache {
     CatalogViewState? catalog,
     CustomersViewState? customers,
     SyncViewState? sync,
+    CheckoutsViewState? checkouts,
     ProductDetailViewState? productDetail,
     CustomerDetailViewState? customerDetail,
     MembersViewState? members,
@@ -347,6 +386,7 @@ class WorkspaceCache {
       catalog: catalog ?? this.catalog,
       customers: customers ?? this.customers,
       sync: sync ?? this.sync,
+      checkouts: checkouts ?? this.checkouts,
       productDetail: productDetail ?? this.productDetail,
       customerDetail: customerDetail ?? this.customerDetail,
       members: members ?? this.members,
@@ -423,6 +463,8 @@ class AppController extends ChangeNotifier {
   CustomersViewState get customers =>
       _cache?.customers ?? const CustomersViewState();
   SyncViewState get sync => _cache?.sync ?? const SyncViewState();
+  CheckoutsViewState get checkouts =>
+      _cache?.checkouts ?? const CheckoutsViewState();
   ProductDetailViewState get productDetail =>
       _cache?.productDetail ?? const ProductDetailViewState();
   CustomerDetailViewState get customerDetail =>
@@ -1160,6 +1202,67 @@ class AppController extends ChangeNotifier {
       );
     }
     notifyListeners();
+  }
+
+  /// Loads the abandoned checkouts for the selected range.
+  ///
+  /// The service has ingested these on every sync since they were added, but
+  /// nothing read them back, so this is the first path that makes the data
+  /// visible to a merchant.
+  Future<void> loadCheckouts({bool refresh = false}) async {
+    final cache = _cache;
+    if (cache == null) return;
+    _replaceCache(
+      cache.copyWith(
+        checkouts: cache.checkouts.copyWith(
+          status: cache.checkouts.page == null
+              ? LoadStatus.loading
+              : LoadStatus.ready,
+          isRefreshing: refresh || cache.checkouts.page != null,
+          clearError: true,
+        ),
+      ),
+    );
+    notifyListeners();
+    final token = _operation(cache.workspace.id, 'checkouts');
+    try {
+      final page = await _repository.listCheckouts(
+        cache.workspace.id,
+        cache.range,
+        cancellationToken: token,
+      );
+      if (!_validCache(cache.workspace.id, token)) return;
+      final current = _workspaceCache[cache.workspace.id]!;
+      _replaceCache(
+        current.copyWith(
+          checkouts: current.checkouts.copyWith(
+            status: LoadStatus.ready,
+            page: page,
+            isRefreshing: false,
+            clearError: true,
+          ),
+        ),
+      );
+      notifyListeners();
+    } catch (error) {
+      if (!_validCache(cache.workspace.id, token) || _isCancelled(error)) {
+        return;
+      }
+      final current = _workspaceCache[cache.workspace.id]!;
+      _replaceCache(
+        current.copyWith(
+          checkouts: current.checkouts.copyWith(
+            status: current.checkouts.page == null
+                ? LoadStatus.failure
+                : LoadStatus.ready,
+            isRefreshing: false,
+            error: _messageFor(error),
+            errorRequestId: _requestIdFor(error),
+          ),
+        ),
+      );
+      notifyListeners();
+    }
   }
 
   Future<void> loadSync({bool refresh = false}) async {

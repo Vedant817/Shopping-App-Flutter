@@ -78,6 +78,7 @@ export async function getOverview(db: Database, workspaceId: string, range: Date
       and orders.currency_code = ${workspace.currencyCode}
       and orders.cancelled_at is null
       and (coalesce(orders.processed_at, orders.shopify_created_at, orders.created_at) at time zone ${workspace.timeZone})::date = days.day
+      and ${occurred} >= ${range.from} and ${occurred} < ${range.to}
     group by days.day
     order by days.day asc
   `);

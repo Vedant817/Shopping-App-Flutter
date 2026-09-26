@@ -1,3 +1,4 @@
+import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:threadline/core/auth_service.dart';
@@ -286,6 +287,83 @@ void main() {
     expect(find.text('owner'), findsOneWidget);
   });
 
+  testWidgets('recovery tab surfaces value the service already ingested', (
+    tester,
+  ) async {
+    _configurePhone(tester);
+    final repository = FakeCommerceRepository(
+      checkouts: [
+        _checkout(id: 'a', email: 'first@example.com', total: '250.00'),
+        _checkout(id: 'b', email: 'second@example.com', total: '100.50'),
+      ],
+    );
+    final harness = _WidgetHarness(
+      auth: FakeAuthService(currentUser: _user()),
+      repository: repository,
+    );
+    addTearDown(harness.dispose);
+    await harness.controller.initialize();
+    await tester.pumpWidget(ThreadlineApp(controller: harness.controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(_destination('Recovery'));
+    await tester.pumpAndSettle();
+
+    // PageIntent uppercases the eyebrow, so assert the rendered casing.
+    expect(find.text('CHECKOUT RECOVERY'), findsOneWidget);
+    expect(find.text('Money left on the table.'), findsOneWidget);
+    // 250.00 + 100.50 added as money rather than as binary floats, and
+    // divided by two for the average, which binary floats would get wrong.
+    expect(find.text(r'$350.50'), findsOneWidget);
+    expect(find.text(r'$175.25'), findsOneWidget);
+    expect(find.text('first@example.com'), findsOneWidget);
+    expect(find.text('second@example.com'), findsOneWidget);
+  });
+
+  testWidgets('recovery tab says so plainly when nothing was abandoned', (
+    tester,
+  ) async {
+    _configurePhone(tester);
+    final harness = _WidgetHarness(
+      auth: FakeAuthService(currentUser: _user()),
+      repository: FakeCommerceRepository(checkouts: const []),
+    );
+    addTearDown(harness.dispose);
+    await harness.controller.initialize();
+    await tester.pumpWidget(ThreadlineApp(controller: harness.controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(_destination('Recovery'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No abandoned checkouts'), findsOneWidget);
+  });
+
+  testWidgets('recovery tab is safe at 320 pixels and 2x text', (tester) async {
+    _configurePhone(tester, size: const Size(320, 760), textScale: 2);
+    final harness = _WidgetHarness(
+      auth: FakeAuthService(currentUser: _user()),
+      repository: FakeCommerceRepository(
+        checkouts: [_checkout(id: 'a', email: 'a@example.com', total: '10.00')],
+      ),
+    );
+    addTearDown(harness.dispose);
+    await harness.controller.initialize();
+    await tester.pumpWidget(ThreadlineApp(controller: harness.controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(_destination('Recovery'));
+    await tester.pumpAndSettle();
+    await tester.fling(
+      _scrollableFor('checkouts-scroll'),
+      const Offset(0, -1200),
+      1200,
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('CHECKOUT RECOVERY'), findsOneWidget);
+  });
   testWidgets('all production tabs stay safe at 320 pixels and 2x text', (
     tester,
   ) async {
@@ -314,6 +392,26 @@ void main() {
       expect(tester.takeException(), isNull, reason: entry.key);
     }
   });
+}
+
+CheckoutDto _checkout({
+  required String id,
+  required String email,
+  required String total,
+}) {
+  return CheckoutDto(
+    id: id,
+    cartId: 'cart-$id',
+    customerId: 'customer-$id',
+    email: email,
+    currencyCode: 'USD',
+    subtotalPrice: Decimal.parse(total),
+    totalPrice: Decimal.parse(total),
+    totalUnits: 2,
+    createdAt: fixtureNow.subtract(const Duration(days: 4)),
+    updatedAt: fixtureNow.subtract(const Duration(days: 3)),
+    completedAt: null,
+  );
 }
 
 Finder _destination(String label) {

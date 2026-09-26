@@ -7,6 +7,7 @@ import '../features/catalog/catalog_page.dart';
 import '../features/customers/customers_page.dart';
 import '../features/customers/workspace_members_page.dart';
 import '../features/overview/overview_page.dart';
+import '../features/checkouts/checkouts_page.dart';
 import '../features/sync/sync_page.dart';
 import 'app_theme.dart';
 import 'app_widgets.dart';
@@ -76,6 +77,7 @@ class _AuthenticatedShell extends StatelessWidget {
       ),
       CatalogPage(key: ValueKey('catalog-$workspaceKey')),
       CustomersPage(key: ValueKey('customers-$workspaceKey')),
+      CheckoutsPage(key: ValueKey('checkouts-$workspaceKey')),
       SyncPage(key: ValueKey('sync-$workspaceKey')),
     ];
     return LayoutBuilder(
@@ -143,6 +145,11 @@ class _AuthenticatedShell extends StatelessWidget {
                 icon: Icon(Icons.people_outline_rounded),
                 selectedIcon: Icon(Icons.people_rounded),
                 label: 'Customers',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.shopping_cart_checkout_outlined),
+                selectedIcon: Icon(Icons.shopping_cart_checkout_rounded),
+                label: 'Recovery',
               ),
               NavigationDestination(
                 icon: Icon(Icons.sync_outlined),
@@ -314,6 +321,11 @@ class _WorkspaceRail extends StatelessWidget {
           icon: Icon(Icons.people_outline_rounded),
           selectedIcon: Icon(Icons.people_rounded),
           label: Text('Customers'),
+        ),
+        NavigationRailDestination(
+          icon: Icon(Icons.shopping_cart_checkout_outlined),
+          selectedIcon: Icon(Icons.shopping_cart_checkout_rounded),
+          label: Text('Recovery'),
         ),
         NavigationRailDestination(
           icon: Icon(Icons.sync_outlined),
