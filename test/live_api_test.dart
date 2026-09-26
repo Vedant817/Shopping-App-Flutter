@@ -147,25 +147,28 @@ void main() {
     expect(detail.product.variants.first.price, isNotNull);
   });
 
-  test('empty tenants return empty pages rather than invented rows', () async {
-    final workspaces = await repository.listWorkspaces();
-    final customers = await repository.listCustomers(
-      workspaces.first.id,
-      InsightRange.thirtyDays,
-    );
-    final orders = await repository.listOrders(
-      workspaces.first.id,
-      InsightRange.thirtyDays,
-    );
-    expect(
-      customers.items,
-      isEmpty,
-      reason: 'the dev store has no customers yet',
-    );
-    expect(orders.items, isEmpty, reason: 'the dev store has no orders yet');
-    expect(customers.nextCursor, isNull);
-    expect(orders.nextCursor, isNull);
-  });
+  test(
+    'a store with no orders returns empty pages rather than invented rows',
+    () async {
+      final workspaces = await repository.listWorkspaces();
+      final customers = await repository.listCustomers(
+        workspaces.first.id,
+        InsightRange.thirtyDays,
+      );
+      final orders = await repository.listOrders(
+        workspaces.first.id,
+        InsightRange.thirtyDays,
+      );
+      expect(
+        customers.items,
+        isEmpty,
+        reason: 'the dev store has no customers yet',
+      );
+      expect(orders.items, isEmpty, reason: 'the dev store has no orders yet');
+      expect(customers.nextCursor, isNull);
+      expect(orders.nextCursor, isNull);
+    },
+  );
 
   test('server side search filters instead of returning everything', () async {
     final workspaces = await repository.listWorkspaces();
