@@ -15,7 +15,7 @@ import { fetchShopProfile } from '../shopify/profile.js';
 import { registerAppWebhooks, webhookCallbackUrl } from '../shopify/webhook-registration.js';
 import { enqueueJob } from '../ingestion/queue.js';
 import { acceptWebhook } from '../ingestion/webhooks.js';
-import { getCustomerDetail, getOverview, getProductDetail, getWorkspaceDto, listCustomers, listOrders, listProducts, listWorkspaces } from '../api/queries.js';
+import { getCustomerDetail, getOverview, getProductDetail, getWorkspaceDto, listCheckouts, listCustomers, listOrders, listProducts, listWorkspaces } from '../api/queries.js';
 import { getIngestionJob, getSyncStatus } from '../api/jobs.js';
 import { decodeCursor, parseLimit } from '../utils/cursor.js';
 import { AppError, badRequest, conflict, forbidden, notFound } from '../utils/errors.js';
@@ -311,6 +311,14 @@ export async function registerRoutes(app: FastifyInstance, dependencies: RouteDe
     const query = orderListQuery.parse(request.query);
     const pagination = parsePagination(query);
     return listOrders(db, workspaceId, range, pagination.limit, pagination.cursor, query.customerId, query.includeCancelled);
+  });
+
+  app.get('/v1/workspaces/:workspaceId/checkouts', async (request) => {
+    const { workspaceId } = workspaceParams.parse(request.params);
+    await requireWorkspaceMembership(db, requireAuth(request).id, workspaceId);
+    const range = parseRange(request.query);
+    const pagination = parsePagination(listQuery.parse(request.query));
+    return listCheckouts(db, workspaceId, range, pagination.limit, pagination.cursor);
   });
 
   app.get('/v1/workspaces/:workspaceId/customers', async (request) => {

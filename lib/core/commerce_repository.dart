@@ -54,6 +54,14 @@ abstract interface class CommerceRepository {
     String? cursor,
     CancellationToken? cancellationToken,
   });
+
+  /// Abandoned checkouts the sync ingested but that no read path exposed.
+  Future<CheckoutPageDto> listCheckouts(
+    String workspaceId,
+    InsightRange range, {
+    String? cursor,
+    CancellationToken? cancellationToken,
+  });
   Future<SyncDto> getSync(
     String workspaceId, {
     CancellationToken? cancellationToken,
@@ -246,6 +254,25 @@ class HttpCommerceRepository implements CommerceRepository {
         if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
       },
       decode: OrderPageDto.fromJson,
+      cancellationToken: cancellationToken,
+    );
+  }
+
+  @override
+  Future<CheckoutPageDto> listCheckouts(
+    String workspaceId,
+    InsightRange range, {
+    String? cursor,
+    CancellationToken? cancellationToken,
+  }) {
+    return _client.getObject<CheckoutPageDto>(
+      ['v1', 'workspaces', workspaceId, 'checkouts'],
+      query: {
+        'limit': '$pageSize',
+        'preset': range.apiValue,
+        if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+      },
+      decode: CheckoutPageDto.fromJson,
       cancellationToken: cancellationToken,
     );
   }

@@ -1,4 +1,6 @@
 import 'dart:convert';
+
+import 'package:decimal/decimal.dart';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -167,6 +169,29 @@ void main() {
       expect(orders.items, isEmpty, reason: 'the dev store has no orders yet');
       expect(customers.nextCursor, isNull);
       expect(orders.nextCursor, isNull);
+    },
+  );
+
+  test(
+    'the abandoned checkout read path works against the deployed API',
+    () async {
+      // The sync ingested these for the life of the project with no way to read
+      // them back, so the client contract for them had never been exercised.
+      final workspaces = await repository.listWorkspaces();
+      final page = await repository.listCheckouts(
+        workspaces.first.id,
+        InsightRange.thirtyDays,
+      );
+      expect(page.recoveredValue.compareTo(Decimal.zero) >= 0, isTrue);
+      expect(
+        page.items.every((item) => item.completedAt == null),
+        isTrue,
+        reason: 'a completed checkout is an order, not abandoned value',
+      );
+      for (final item in page.items) {
+        expect(item.totalPrice.compareTo(Decimal.zero) >= 0, isTrue);
+        expect(item.currencyCode, 'INR');
+      }
     },
   );
 

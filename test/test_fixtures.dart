@@ -394,12 +394,14 @@ class FakeCommerceRepository implements CommerceRepository {
     this.products,
     this.customers,
     this.members,
+    this.checkouts,
   }) : workspaces = workspaces ?? [fixtureWorkspace()];
 
   List<WorkspaceDto> workspaces;
   List<ProductDto>? products;
   List<CustomerDto>? customers;
   List<WorkspaceMemberDto>? members;
+  List<CheckoutDto>? checkouts;
   OverviewDto? overview;
   Object? error;
   Duration delay = Duration.zero;
@@ -543,6 +545,29 @@ class FakeCommerceRepository implements CommerceRepository {
         nextCursor: null,
         includeCancelled: false,
         cancellationPolicy: 'excluded',
+      ),
+    );
+  }
+
+  @override
+  Future<CheckoutPageDto> listCheckouts(
+    String workspaceId,
+    InsightRange range, {
+    String? cursor,
+    CancellationToken? cancellationToken,
+  }) async {
+    requestedWorkspaceIds.add(workspaceId);
+    return _guard(
+      () => CheckoutPageDto(
+        items: checkouts ?? const [],
+        nextCursor: null,
+        recoveredValue: (checkouts ?? const []).fold(
+          Decimal.zero,
+          (total, item) => total + item.totalPrice,
+        ),
+        currencyCode: checkouts == null || checkouts!.isEmpty
+            ? ''
+            : checkouts!.first.currencyCode,
       ),
     );
   }

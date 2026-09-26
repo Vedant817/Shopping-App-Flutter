@@ -99,6 +99,20 @@ export type OrderDto = {
   updatedAt: string;
 };
 
+export type CheckoutDto = {
+  id: string;
+  cartId: string | null;
+  customerId: string | null;
+  email: string | null;
+  currencyCode: string;
+  subtotalPrice: string;
+  totalPrice: string;
+  totalUnits: number;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+};
+
 export type DataQualityDto = {
   productMediaCoverage: string;
   customerMediaCoverage: string;

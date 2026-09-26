@@ -1,10 +1,11 @@
 import { sql } from 'drizzle-orm';
+import { Decimal } from 'decimal.js';
 import { capabilitiesForRole, parseWorkspaceRole } from '../auth/tenant.js';
 import type { Database } from '../db/client.js';
 import { decodeCursor, encodeCursor } from '../utils/cursor.js';
 import { parseMoney, divideMoney, ratio, subtractMoney } from '../utils/money.js';
 import type { DateRange } from '../utils/time.js';
-import type { CustomerDto, DataQualityDto, DecisionDto, OrderDto, OverviewDto, PeriodDemand, ProductDto, ProductVariantDto, WorkspaceDto } from './dtos.js';
+import type { CheckoutDto, CustomerDto, DataQualityDto, DecisionDto, OrderDto, OverviewDto, PeriodDemand, ProductDto, ProductVariantDto, WorkspaceDto } from './dtos.js';
 import { getSyncStatus as getSyncJobStatus } from './jobs.js';
 
 export async function listWorkspaces(db: Database, userId: string): Promise<WorkspaceDto[]> {
@@ -347,6 +348,60 @@ export type OrderListResult = {
   cancellationPolicy: 'excluded' | 'included';
 };
 
+export type CheckoutListResult = {
+  items: CheckoutDto[];
+  nextCursor: string | null;
+  recoveredValue: string;
+  currencyCode: string;
+};
+
+/**
+ * Abandoned checkouts, newest first.
+ *
+ * The sync has always ingested these, but nothing could read them back, so the
+ * table grew on every full sync while the feature was invisible. The window is
+ * the range's own, matching orders, so a merchant comparing the two sees the
+ * same period rather than two different clocks.
+ *
+ * Only genuinely abandoned rows are returned: a checkout that later completed is
+ * an order, and counting its value as lost would overstate the problem.
+ */
+export async function listCheckouts(
+  db: Database,
+  workspaceId: string,
+  range: DateRange,
+  limit: number,
+  cursor?: string,
+): Promise<CheckoutListResult> {
+  const decoded = decodeCursor(cursor);
+  const created = sql`coalesce(c.shopify_created_at, c.created_at)`;
+  const updated = sql`coalesce(c.shopify_updated_at, c.updated_at)`;
+  const cursorPredicate = decoded
+    ? sql`(${updated} < ${new Date(decoded.key)} or (${updated} = ${new Date(decoded.key)} and c.id < ${decoded.id}))`
+    : sql`true`;
+  const result = await db.execute(sql`
+    select c.id, c.cart_id, c.customer_id, c.email, c.currency_code,
+      c.subtotal_price, c.total_price, c.total_quantity,
+      ${created} as created_at, ${updated} as updated_at, c.completed_at
+    from checkouts c
+    where c.workspace_id = ${workspaceId}
+      and c.completed_at is null
+      and ${created} >= ${range.from} and ${created} < ${range.to}
+      and ${cursorPredicate}
+    order by updated_at desc, c.id desc
+    limit ${limit + 1}
+  `);
+  const rows = result.rows.slice(0, limit);
+  const last = rows.at(-1);
+  const nextCursor = result.rows.length > limit && last ? encodeCursor({ key: dateValue(last.updated_at).toISOString(), id: String(last.id) }) : null;
+  const items = rows.map(mapCheckout);
+  const recoveredValue = items
+    .reduce((total, item) => total.plus(item.totalPrice), new Decimal(0))
+    .toFixed(2);
+  const currencyCode = items[0]?.currencyCode ?? '';
+  return { items, nextCursor, recoveredValue, currencyCode };
+}
+
 export async function listOrders(
   db: Database,
   workspaceId: string,
@@ -575,6 +630,23 @@ function mapOrder(row: unknown): OrderDto {
     orderedAt: dateValue(value.ordered_at).toISOString(),
     cancelledAt: nullableDate(value.cancelled_at),
     updatedAt: dateValue(value.updated_at).toISOString(),
+  };
+}
+
+function mapCheckout(row: unknown): CheckoutDto {
+  const value = recordOrEmpty(row);
+  return {
+    id: String(value.id),
+    cartId: nullableString(value.cart_id),
+    customerId: nullableString(value.customer_id),
+    email: nullableString(value.email),
+    currencyCode: String(value.currency_code),
+    subtotalPrice: normalizeDbMoney(value.subtotal_price),
+    totalPrice: normalizeDbMoney(value.total_price),
+    totalUnits: numberValue(value.total_quantity),
+    createdAt: dateValue(value.created_at).toISOString(),
+    updatedAt: dateValue(value.updated_at).toISOString(),
+    completedAt: nullableDate(value.completed_at),
   };
 }
 

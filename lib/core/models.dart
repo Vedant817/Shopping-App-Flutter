@@ -874,6 +874,78 @@ class CustomerDetailDto {
   final List<OrderDto> recentOrders;
 }
 
+class CheckoutDto {
+  const CheckoutDto({
+    required this.id,
+    required this.cartId,
+    required this.customerId,
+    required this.email,
+    required this.currencyCode,
+    required this.subtotalPrice,
+    required this.totalPrice,
+    required this.totalUnits,
+    required this.createdAt,
+    required this.updatedAt,
+    required this.completedAt,
+  });
+
+  factory CheckoutDto.fromJson(Map<String, dynamic> json) {
+    return CheckoutDto(
+      id: _string(json, 'id'),
+      cartId: _nullableString(json, 'cartId'),
+      customerId: _nullableString(json, 'customerId'),
+      email: _nullableString(json, 'email'),
+      currencyCode: _string(json, 'currencyCode'),
+      subtotalPrice: _decimal(json, 'subtotalPrice'),
+      totalPrice: _decimal(json, 'totalPrice'),
+      totalUnits: _integer(json, 'totalUnits'),
+      createdAt: _date(json, 'createdAt'),
+      updatedAt: _date(json, 'updatedAt'),
+      completedAt: _nullableDate(json, 'completedAt'),
+    );
+  }
+
+  final String id;
+  final String? cartId;
+  final String? customerId;
+  final String? email;
+  final String currencyCode;
+  final Decimal subtotalPrice;
+  final Decimal totalPrice;
+  final int totalUnits;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final DateTime? completedAt;
+}
+
+class CheckoutPageDto {
+  const CheckoutPageDto({
+    required this.items,
+    required this.nextCursor,
+    required this.recoveredValue,
+    required this.currencyCode,
+  });
+
+  factory CheckoutPageDto.fromJson(Map<String, dynamic> json) {
+    return CheckoutPageDto(
+      items: _list(
+        json,
+        'items',
+      ).map(CheckoutDto.fromJson).toList(growable: false),
+      nextCursor: _nullableString(json, 'nextCursor'),
+      recoveredValue: _decimal(json, 'recoveredValue'),
+      currencyCode: _string(json, 'currencyCode'),
+    );
+  }
+
+  final List<CheckoutDto> items;
+  final String? nextCursor;
+
+  /// Value left on the table by the checkouts in this page.
+  final Decimal recoveredValue;
+  final String currencyCode;
+}
+
 class OrderPageDto {
   const OrderPageDto({
     required this.items,
