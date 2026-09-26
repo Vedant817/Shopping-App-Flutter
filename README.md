@@ -165,11 +165,28 @@ The service must have the same mobile return URL in `SHOPIFY_MOBILE_POST_INSTALL
 
 ## Authentication and authorization
 
-- Supabase Email OTP is the only client sign-in path in this build.
+- Two client sign-in paths: **Google OAuth** and **Supabase Email OTP**. Both end in a Supabase session; the rest of the app cannot tell them apart.
 - Supabase access tokens are stored with platform secure storage and sent as Bearer credentials.
 - The service validates Supabase JWTs against JWKS and checks workspace membership on every tenant route.
 - Workspace roles and capabilities are server-authoritative. The client hides unauthorized actions, while the service remains the enforcement point.
 - Shopify offline tokens are encrypted at rest by the service and are never sent to Flutter.
+
+### Google sign-in
+
+Email OTP depends on a working mail provider, and a project on Supabase's built-in SMTP is rate limited to a handful of messages per hour, which makes it unusable for real sign-in. Google OAuth removes the dependency on email delivery entirely.
+
+The app asks Supabase for the provider URL with `getOAuthSignInUrl` and opens it through the injected `AuthorizationLauncher`, the same launcher the Shopify install uses, so the hand-off is testable rather than hidden inside the SDK. `detectSessionInUri` stays off and the return trip is handled explicitly by `consumeAuthRedirect`, which recognises both the PKCE `code` query and the implicit fragment. A redirect that carries an OAuth error leaves the user signed out with an explanation rather than half-authenticated.
+
+`threadline://auth/callback` is derived from `SHOPIFY_MOBILE_RETURN_URL` so both hand-offs arrive through a scheme the platform already routes into the app. A **web** build cannot use a custom scheme, so pass `AUTH_REDIRECT_URL` with the deployed origin; an absent value is fine and a value that is present but unroutable is rejected rather than silently ignored.
+
+Setting it up, none of which needs a domain you own:
+
+1. Google Cloud Console → new project → **APIs & Services → OAuth consent screen**. Choose External and add yourself under **Test users**; verification is not required to sign in, the consent screen just shows a "Google hasn't verified this app" warning.
+2. **Credentials → Create credentials → OAuth client ID → Web application**.
+3. Add `https://<project-ref>.supabase.co/auth/v1/callback` as an **Authorized redirect URI**.
+4. Supabase → **Authentication → Providers → Google**: paste the client ID and client secret, enable it, and save.
+5. Supabase → **Authentication → URL Configuration → Redirect URLs**: add `threadline://auth/callback`, plus the web origin when `AUTH_REDIRECT_URL` is used. Supabase matches the scheme exactly, so the slashes matter.
+
 
 ### Shopify token lifecycle
 

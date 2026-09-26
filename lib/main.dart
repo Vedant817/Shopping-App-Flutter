@@ -33,6 +33,7 @@ Future<void> main() async {
       deepLinkService: AppLinksDeepLinkService(),
       authorizationLauncher: const ExternalAuthorizationLauncher(),
       shopifyMobileReturnUrl: config.shopifyMobileReturnUrl!,
+      googleRedirectUrl: config.authRedirectUrl,
     );
     runApp(ThreadlineApp(controller: controller));
     unawaited(controller.initialize());

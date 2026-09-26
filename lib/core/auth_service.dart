@@ -10,6 +10,21 @@ abstract interface class AuthService {
   Stream<AuthUser?> get authStateChanges;
   Future<void> sendEmailOtp(String email);
   Future<void> verifyEmailOtp({required String email, required String token});
+
+  /// Starts a Google sign-in and returns the authorization URL to open in a
+  /// browser. The flow completes out of process: Google redirects to Supabase,
+  /// Supabase redirects back to this app, and [consumeAuthRedirect] turns that
+  /// return trip into a session.
+  Future<Uri> beginGoogleSignIn({required Uri redirectTo});
+
+  /// Applies an OAuth redirect that carried the session back to the app.
+  ///
+  /// Returns true when the redirect produced a signed-in session. A redirect
+  /// that carries an OAuth error, or none at all, returns false rather than
+  /// throwing, because the same entry point also sees unrelated deep links such
+  /// as the Shopify install callback.
+  Future<bool> consumeAuthRedirect(Uri uri);
+
   Future<void> signOut();
 }
 
@@ -83,7 +98,54 @@ class SupabaseAuthService implements AuthService {
   }
 
   @override
+  Future<Uri> beginGoogleSignIn({required Uri redirectTo}) async {
+    // getOAuthSignInUrl rather than signInWithOAuth: the extension launches the
+    // browser itself, which would bypass the injected AuthorizationLauncher and
+    // make the whole hand-off untestable. The URL is opened by the controller.
+    final response = await _supabase.client.auth.getOAuthSignInUrl(
+      provider: OAuthProvider.google,
+      redirectTo: redirectTo.toString(),
+      scopes: 'openid email profile',
+    );
+    return Uri.parse(response.url);
+  }
+
+  @override
+  Future<bool> consumeAuthRedirect(Uri uri) async {
+    final fragment = uri.fragment;
+    final query = uri.queryParameters;
+    final carriesError = query['error'] != null || fragment.contains('error=');
+    final carriesSession =
+        query.containsKey('code') ||
+        fragment.contains('access_token=') ||
+        fragment.contains('refresh_token=');
+    if (!carriesError && !carriesSession) {
+      // Not an auth redirect. The same deep link listener also receives the
+      // Shopify install callback and any threadline:// link, so this must
+      // decline rather than assume.
+      return false;
+    }
+    if (carriesError) {
+      throw AuthException(_describeOAuthError(uri));
+    }
+    // Handles both the PKCE code query and the implicit fragment form, and
+    // persists the session through the secure storage this service configured.
+    await _supabase.client.auth.getSessionFromUrl(uri, storeSession: true);
+    return true;
+  }
+
+  @override
   Future<void> signOut() => _supabase.client.auth.signOut();
+
+  static String _describeOAuthError(Uri uri) {
+    final raw =
+        uri.queryParameters['error_description'] ??
+        uri.queryParameters['error'] ??
+        (uri.fragment.contains('error_description=')
+            ? uri.fragment.split('error_description=').last.split('&').first
+            : 'access_denied');
+    return raw.replaceAll('+', ' ').replaceAll('%20', ' ').replaceAll('_', ' ');
+  }
 
   static AuthUser? _map(Session? session) {
     if (session == null) return null;

@@ -18,11 +18,51 @@ void main() {
       );
 
       expect(config.isValid, isFalse);
+      // The OAuth redirect is deliberately excluded: a native build derives one
+      // from the return URL, so demanding it would break every existing build
+      // for no gain.
       expect(
         config.issues.map((issue) => issue.name),
-        containsAll(RuntimeConfig.defineNames),
+        containsAll(RuntimeConfig.requiredDefineNames),
+      );
+      expect(
+        config.issues.map((issue) => issue.name),
+        isNot(contains(RuntimeConfig.authRedirectUrlName)),
       );
     });
+
+    test(
+      'accepts an OAuth redirect over HTTPS and rejects an unusable one',
+      () {
+        final good = RuntimeConfig.fromValues(
+          apiBaseUrl: 'https://api.example.com',
+          supabaseUrl: 'https://project.supabase.co',
+          supabasePublishableKey: 'sb_publishable_example-key',
+          shopifyMobileReturnUrl: 'threadline://shopify/install',
+          authRedirectUrl: 'https://app.example.com/auth/callback',
+        );
+        expect(good.isValid, isTrue);
+        expect(
+          good.authRedirectUrl.toString(),
+          'https://app.example.com/auth/callback',
+        );
+
+        // A present but unroutable redirect is an error, not a silent fallback:
+        // the user would be stranded on the provider's page with no way back.
+        final bad = RuntimeConfig.fromValues(
+          apiBaseUrl: 'https://api.example.com',
+          supabaseUrl: 'https://project.supabase.co',
+          supabasePublishableKey: 'sb_publishable_example-key',
+          shopifyMobileReturnUrl: 'threadline://shopify/install',
+          authRedirectUrl: 'http://app.example.com/auth',
+        );
+        expect(bad.isValid, isFalse);
+        expect(
+          bad.issues.map((issue) => issue.name),
+          contains(RuntimeConfig.authRedirectUrlName),
+        );
+      },
+    );
 
     test('accepts HTTPS services, publishable auth, and the native return', () {
       final config = RuntimeConfig.fromValues(

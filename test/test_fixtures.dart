@@ -328,6 +328,52 @@ class FakeAuthService implements AuthService {
   @override
   Stream<AuthUser?> get authStateChanges => changes.stream;
 
+  /// Set to make beginGoogleSignIn throw, exercising the failure path.
+  Object? googleError;
+
+  /// When true, consumeAuthRedirect reports that nothing was recognised.
+  bool redirectDeclined = false;
+
+  /// When set, consumeAuthRedirect throws this instead of signing in.
+  Object? redirectError;
+
+  final List<Uri> consumedRedirects = [];
+  Uri? googleRedirectTo;
+
+  @override
+  Future<Uri> beginGoogleSignIn({required Uri redirectTo}) async {
+    googleRedirectTo = redirectTo;
+    if (googleError != null) throw googleError!;
+    return Uri.parse(
+      'https://pqmttxsftxzyrjqwztuu.supabase.co/auth/v1/authorize'
+      '?provider=google&redirect_to=${Uri.encodeComponent(redirectTo.toString())}',
+    );
+  }
+
+  @override
+  Future<bool> consumeAuthRedirect(Uri uri) async {
+    consumedRedirects.add(uri);
+    if (redirectError != null) throw redirectError!;
+    if (redirectDeclined) return false;
+    // Mirrors the real service: an OAuth error in the redirect is a refusal,
+    // not a session, and must not be mistaken for a successful sign-in.
+    if (uri.queryParameters['error'] != null ||
+        uri.fragment.contains('error=')) {
+      throw StateError(
+        uri.queryParameters['error_description'] ??
+            uri.queryParameters['error'] ??
+            'access_denied',
+      );
+    }
+    currentUser = const AuthUser(
+      id: 'google-user-1',
+      email: 'signed.in@gmail.com',
+      accessToken: 'google-access-token',
+    );
+    changes.add(currentUser);
+    return true;
+  }
+
   @override
   Future<void> sendEmailOtp(String email) async {
     sentEmail = email;
@@ -735,4 +781,12 @@ class FakeCommerceRepository implements CommerceRepository {
     if (currentError != null) throw currentError;
     return value();
   }
+}
+
+/// An AuthService whose stream access throws, standing in for a real startup
+/// failure such as a platform channel that never answers. Extends the fake so
+/// the widget harness can drive it like any other.
+class ThrowingAuthService extends FakeAuthService {
+  @override
+  Stream<AuthUser?> get authStateChanges => throw StateError('no auth channel');
 }

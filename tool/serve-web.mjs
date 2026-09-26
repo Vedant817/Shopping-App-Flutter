@@ -33,6 +33,15 @@ createServer((request, response) => {
     response.writeHead(403).end();
     return;
   }
+  // A release build ships a service worker that caches the hashed asset bundle.
+  // After a rebuild the old worker keeps serving the previous JavaScript, which
+  // mixes stale and current code and produces failures that look like
+  // application bugs. This server exists to inspect a build, so the worker is
+  // refused outright and every load is served from disk.
+  if (relative === 'flutter_service_worker.js') {
+    response.writeHead(404, { 'cache-control': 'no-store' }).end();
+    return;
+  }
   if (!existsSync(filePath) || statSync(filePath).isDirectory()) {
     filePath = join(root, 'index.html');
   }

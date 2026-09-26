@@ -22,6 +22,7 @@ enum AuthPhase {
   sendingCode,
   codeSent,
   verifyingCode,
+  openingGoogle,
   authenticated,
 }
 
@@ -401,6 +402,7 @@ class AppController extends ChangeNotifier {
     required DeepLinkService deepLinkService,
     required AuthorizationLauncher authorizationLauncher,
     required Uri shopifyMobileReturnUrl,
+    this.googleRedirectUrl,
     this.syncPollInterval = const Duration(seconds: 2),
     Future<void> Function(Duration)? delay,
   }) : _authService = authService,
@@ -415,6 +417,20 @@ class AppController extends ChangeNotifier {
   final DeepLinkService _deepLinkService;
   final AuthorizationLauncher _authorizationLauncher;
   final Uri _shopifyMobileReturnUrl;
+
+  /// Where Google sends the user back to. Must be registered as an allowed
+  /// redirect URL in Supabase, and the scheme must be one the platform routes
+  /// back into this app. Left unset it is derived from the Shopify return URL so
+  /// both hand-offs arrive through the same registered scheme.
+  final Uri? googleRedirectUrl;
+
+  Uri get _googleRedirectUri =>
+      googleRedirectUrl ??
+      Uri(
+        scheme: _shopifyMobileReturnUrl.scheme,
+        host: 'auth',
+        path: '/callback',
+      );
   final Duration syncPollInterval;
   final Future<void> Function(Duration) _delay;
 
@@ -478,13 +494,51 @@ class AppController extends ChangeNotifier {
   Future<void> initialize() async {
     if (_initialized) return;
     _initialized = true;
-    _authSubscription = _authService.authStateChanges.listen(
-      _handleAuthState,
-      onError: (_) => _handleAuthState(null),
-    );
-    _linkSubscription = _deepLinkService.links.listen(_handleDeepLink);
-    await _handleAuthState(_authService.currentUser);
-    unawaited(_loadInitialLink());
+    // Without this, any failure below leaves AppStatus at initializing and the
+    // user staring at a progress bar that never resolves, because the caller
+    // fires initialize() without awaiting it and nothing else clears that
+    // state. A startup failure has to be visible and retryable.
+    try {
+      _authSubscription = _authService.authStateChanges.listen(
+        _handleAuthState,
+        onError: (_) => _handleAuthState(null),
+      );
+      _linkSubscription = _deepLinkService.links.listen(_handleDeepLink);
+      await _handleAuthState(_authService.currentUser);
+      unawaited(_loadInitialLink());
+    } catch (error) {
+      _authPhase = AuthPhase.signedOut;
+      _status = AppStatus.failure;
+      _workspaceError =
+          'Sign-in could not start on this device. Restarting usually helps; '
+          'otherwise the runtime configuration may be wrong.';
+      notifyListeners();
+    }
+  }
+
+  /// Starts Google sign-in and opens the provider consent page.
+  ///
+  /// The flow leaves the app, so this only has to get the user to the browser.
+  /// Coming back is handled by [_handleDeepLink], which recognises the redirect
+  /// and turns it into a session. Email OTP stays available because a merchant
+  /// may not be signed in to the Google account they want to use.
+  Future<void> signInWithGoogle() async {
+    if (_authPhase == AuthPhase.openingGoogle) return;
+    _authPhase = AuthPhase.openingGoogle;
+    _authError = null;
+    _authMessage = null;
+    notifyListeners();
+    try {
+      final url = await _authService.beginGoogleSignIn(
+        redirectTo: _googleRedirectUri,
+      );
+      await _authorizationLauncher.open(url);
+    } catch (_) {
+      _authPhase = AuthPhase.signedOut;
+      _authError =
+          'Google sign-in could not be started. Check your connection and try again.';
+      notifyListeners();
+    }
   }
 
   Future<void> sendOtp(String email) async {
@@ -1539,8 +1593,44 @@ class AppController extends ChangeNotifier {
   }
 
   void _handleDeepLink(Uri uri) {
+    // The auth redirect is checked first: it is the one that arrives while the
+    // user is signed out, and the Shopify return is guarded on a signed-in
+    // user anyway.
+    if (_isAuthRedirect(uri)) {
+      unawaited(_completeGoogleSignIn(uri));
+      return;
+    }
     if (!_isShopifyInstallReturn(uri) || _accessToken == null) return;
     unawaited(_loadWorkspaces());
+  }
+
+  /// True when the link carries an OAuth result rather than being one of the
+  /// app's own navigation links.
+  bool _isAuthRedirect(Uri uri) {
+    final fragment = uri.fragment;
+    return uri.queryParameters.containsKey('code') ||
+        uri.queryParameters['error'] != null ||
+        fragment.contains('access_token=') ||
+        fragment.contains('error=');
+  }
+
+  Future<void> _completeGoogleSignIn(Uri uri) async {
+    try {
+      final signedIn = await _authService.consumeAuthRedirect(uri);
+      if (!signedIn) return;
+      final user = _authService.currentUser;
+      if (user != null) {
+        await _handleAuthState(user);
+      } else {
+        _authPhase = AuthPhase.signedOut;
+        notifyListeners();
+      }
+    } catch (_) {
+      _authPhase = AuthPhase.signedOut;
+      _authError =
+          'Google sign-in did not complete. Nothing was changed, so you can try again.';
+      notifyListeners();
+    }
   }
 
   bool _isShopifyInstallReturn(Uri uri) {

@@ -6,6 +6,7 @@ class RuntimeConfig {
     required this.supabaseUrl,
     required this.supabasePublishableKey,
     required this.shopifyMobileReturnUrl,
+    required this.authRedirectUrl,
     required this.issues,
   });
 
@@ -19,6 +20,7 @@ class RuntimeConfig {
       shopifyMobileReturnUrl: const String.fromEnvironment(
         'SHOPIFY_MOBILE_RETURN_URL',
       ),
+      authRedirectUrl: const String.fromEnvironment('AUTH_REDIRECT_URL'),
     );
   }
 
@@ -27,6 +29,7 @@ class RuntimeConfig {
     required String supabaseUrl,
     required String supabasePublishableKey,
     required String shopifyMobileReturnUrl,
+    String? authRedirectUrl,
   }) {
     final issues = <ConfigIssue>[];
     final api = _httpsBaseUrl(apiBaseUrl, apiBaseUrlName, issues);
@@ -47,6 +50,11 @@ class RuntimeConfig {
       supabaseUrl: supabase,
       supabasePublishableKey: key,
       shopifyMobileReturnUrl: mobileReturn,
+      authRedirectUrl: _optionalRedirect(
+        authRedirectUrl,
+        authRedirectUrlName,
+        issues,
+      ),
       issues: List.unmodifiable(issues),
     );
   }
@@ -55,18 +63,36 @@ class RuntimeConfig {
   static const supabaseUrlName = 'SUPABASE_URL';
   static const supabasePublishableKeyName = 'SUPABASE_PUBLISHABLE_KEY';
   static const shopifyMobileReturnUrlName = 'SHOPIFY_MOBILE_RETURN_URL';
+  static const authRedirectUrlName = 'AUTH_REDIRECT_URL';
   static const expectedShopifyMobileReturnUrl = 'threadline://shopify/install';
-  static const defineNames = <String>[
+
+  /// Names that must be supplied for the app to run at all.
+  static const requiredDefineNames = <String>[
     apiBaseUrlName,
     supabaseUrlName,
     supabasePublishableKeyName,
     shopifyMobileReturnUrlName,
   ];
 
+  /// Every name the build understands, required or not.
+  static const defineNames = <String>[
+    ...requiredDefineNames,
+    authRedirectUrlName,
+  ];
+
   final Uri? apiBaseUrl;
   final Uri? supabaseUrl;
   final String supabasePublishableKey;
   final Uri? shopifyMobileReturnUrl;
+
+  /// Where an OAuth provider returns the user after Google sign-in.
+  ///
+  /// Optional, because a native build can reuse the scheme the platform already
+  /// routes back into the app. A web build cannot: a browser has no way to open
+  /// `threadline://`, so the deployed origin has to be supplied and registered
+  /// as an allowed redirect URL in Supabase.
+  final Uri? authRedirectUrl;
+
   final List<ConfigIssue> issues;
 
   bool get isValid =>
@@ -74,6 +100,39 @@ class RuntimeConfig {
       apiBaseUrl != null &&
       supabaseUrl != null &&
       shopifyMobileReturnUrl != null;
+
+  /// Parses an optional redirect target.
+  ///
+  /// Absent is valid and means "derive one from the mobile return URL". A value
+  /// that is present but unusable is an error rather than a silent fallback,
+  /// because a redirect the platform cannot route back would strand the user on
+  /// the provider's page with no way to return.
+  static Uri? _optionalRedirect(
+    String? value,
+    String name,
+    List<ConfigIssue> issues,
+  ) {
+    final normalized = value?.trim() ?? '';
+    if (normalized.isEmpty) return null;
+    final uri = Uri.tryParse(normalized);
+    if (uri == null || uri.scheme.isEmpty) {
+      issues.add(ConfigIssue(name: name, message: 'Expected an absolute URI.'));
+      return null;
+    }
+    final loopbackHttp =
+        uri.scheme == 'http' && _loopbackHosts.contains(uri.host);
+    if (uri.scheme != 'https' && !loopbackHttp) {
+      issues.add(
+        ConfigIssue(
+          name: name,
+          message:
+              'Use HTTPS, or plain HTTP on loopback for local development.',
+        ),
+      );
+      return null;
+    }
+    return uri;
+  }
 
   static Uri? _httpsBaseUrl(
     String value,

@@ -287,6 +287,175 @@ void main() {
     expect(find.text('owner'), findsOneWidget);
   });
 
+  testWidgets('a failed startup surfaces an error instead of hanging', (
+    tester,
+  ) async {
+    // initialize() runs unawaited, so anything it throws used to leave the app
+    // on the loading screen with a progress bar that never resolved and no way
+    // forward. It has to become a visible, retryable failure.
+    _configurePhone(tester);
+    final harness = _WidgetHarness(auth: ThrowingAuthService());
+    addTearDown(harness.dispose);
+    await harness.controller.initialize();
+    await tester.pumpWidget(ThreadlineApp(controller: harness.controller));
+    await tester.pumpAndSettle();
+
+    expect(harness.controller.status, AppStatus.failure);
+    expect(harness.controller.workspaceError, isNotNull);
+    expect(find.textContaining('Sign-in could not start'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+  });
+  testWidgets('sign in offers Google alongside the email code', (tester) async {
+    _configurePhone(tester);
+    final harness = _WidgetHarness(auth: FakeAuthService());
+    addTearDown(harness.dispose);
+    await harness.controller.initialize();
+    await tester.pumpWidget(ThreadlineApp(controller: harness.controller));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Continue with Google'), findsOneWidget);
+    expect(find.text('Send verification code'), findsOneWidget);
+    expect(find.byKey(const Key('sign-in-with-google')), findsOneWidget);
+  });
+
+  testWidgets('Google sign-in opens the provider URL for the app callback', (
+    tester,
+  ) async {
+    _configurePhone(tester);
+    final auth = FakeAuthService();
+    final launcher = FakeAuthorizationLauncher();
+    final harness = _WidgetHarness(auth: auth, launcher: launcher);
+    addTearDown(harness.dispose);
+    await harness.controller.initialize();
+    await tester.pumpWidget(ThreadlineApp(controller: harness.controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('sign-in-with-google')));
+    await tester.pumpAndSettle();
+
+    // The redirect must come back through the scheme the platform already
+    // routes into this app, otherwise the user is stranded on a web page.
+    expect(auth.googleRedirectTo.toString(), 'threadline://auth/callback');
+    final opened = launcher.opened;
+    expect(opened, isNotNull);
+    expect(opened!.scheme, 'https');
+    expect(opened.host, 'pqmttxsftxzyrjqwztuu.supabase.co');
+    expect(opened.path, '/auth/v1/authorize');
+    expect(
+      Uri.decodeComponent(opened.queryParameters['redirect_to'] ?? ''),
+      'threadline://auth/callback',
+    );
+  });
+
+  testWidgets('a failed Google hand-off leaves the user signed out', (
+    tester,
+  ) async {
+    _configurePhone(tester);
+    final auth = FakeAuthService()..googleError = StateError('no browser');
+    final harness = _WidgetHarness(auth: auth);
+    addTearDown(harness.dispose);
+    await harness.controller.initialize();
+    await tester.pumpWidget(ThreadlineApp(controller: harness.controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('sign-in-with-google')));
+    await tester.pumpAndSettle();
+
+    expect(harness.controller.authPhase, AuthPhase.signedOut);
+    expect(find.textContaining('could not be started'), findsOneWidget);
+    // The email path must remain usable after a Google failure.
+    expect(find.text('Send verification code'), findsOneWidget);
+  });
+
+  testWidgets('the OAuth return deep link signs the user in', (tester) async {
+    _configurePhone(tester);
+    final auth = FakeAuthService();
+    final deepLinks = FakeDeepLinkService();
+    final harness = _WidgetHarness(auth: auth, deepLinks: deepLinks);
+    addTearDown(harness.dispose);
+    await harness.controller.initialize();
+    await tester.pumpWidget(ThreadlineApp(controller: harness.controller));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Sign in to Threadline'), findsOneWidget);
+
+    deepLinks.emit(
+      Uri.parse(
+        'threadline://auth/callback#access_token=abc&refresh_token=def',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(auth.consumedRedirects, hasLength(1));
+    expect(harness.controller.authPhase, AuthPhase.authenticated);
+    expect(find.text('Sign in to Threadline'), findsNothing);
+  });
+
+  testWidgets('an OAuth return carrying an error does not sign anyone in', (
+    tester,
+  ) async {
+    _configurePhone(tester);
+    final auth = FakeAuthService();
+    final deepLinks = FakeDeepLinkService();
+    final harness = _WidgetHarness(auth: auth, deepLinks: deepLinks);
+    addTearDown(harness.dispose);
+    await harness.controller.initialize();
+    await tester.pumpWidget(ThreadlineApp(controller: harness.controller));
+    await tester.pumpAndSettle();
+
+    deepLinks.emit(
+      Uri.parse(
+        'threadline://auth/callback?error=access_denied&error_description=User+cancelled',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(harness.controller.authPhase, AuthPhase.signedOut);
+    expect(find.text('Sign in to Threadline'), findsOneWidget);
+    expect(find.textContaining('did not complete'), findsOneWidget);
+  });
+
+  testWidgets('the Shopify install return is not mistaken for a sign-in', (
+    tester,
+  ) async {
+    _configurePhone(tester);
+    final auth = FakeAuthService(
+      currentUser: const AuthUser(
+        id: 'user-1',
+        email: 'owner@example.com',
+        accessToken: 'access-token',
+      ),
+    );
+    final deepLinks = FakeDeepLinkService();
+    final harness = _WidgetHarness(auth: auth, deepLinks: deepLinks);
+    addTearDown(harness.dispose);
+    await harness.controller.initialize();
+    await tester.pumpWidget(ThreadlineApp(controller: harness.controller));
+    await tester.pumpAndSettle();
+
+    deepLinks.emit(
+      Uri.parse('threadline://shopify/install?workspace=abc&installed=1'),
+    );
+    await tester.pumpAndSettle();
+
+    // Regression guard: the two deep links share a scheme, so the auth check
+    // must not swallow the install callback.
+    expect(auth.consumedRedirects, isEmpty);
+  });
+
+  testWidgets('the Google button is safe at 320 pixels and 2x text', (
+    tester,
+  ) async {
+    _configurePhone(tester, size: const Size(320, 760), textScale: 2);
+    final harness = _WidgetHarness(auth: FakeAuthService());
+    addTearDown(harness.dispose);
+    await harness.controller.initialize();
+    await tester.pumpWidget(ThreadlineApp(controller: harness.controller));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const Key('sign-in-with-google')), findsOneWidget);
+  });
   testWidgets('recovery tab surfaces value the service already ingested', (
     tester,
   ) async {

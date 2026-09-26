@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -360,6 +361,7 @@ class _AuthViewState extends State<AuthView> {
     final controller = context.watch<AppController>();
     final sending = controller.authPhase == AuthPhase.sendingCode;
     final verifying = controller.authPhase == AuthPhase.verifyingCode;
+    final openingGoogle = controller.authPhase == AuthPhase.openingGoogle;
     final codeSent = controller.authPhase == AuthPhase.codeSent;
     return Center(
       child: SingleChildScrollView(
@@ -377,7 +379,7 @@ class _AuthViewState extends State<AuthView> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Use your email address. We will send a one-time verification code when the address can receive Threadline email.',
+                    'Continue with Google, or use your email address. We will send a one-time verification code when the address can receive Threadline email.',
                     style: Theme.of(context).textTheme.bodyLarge,
                   ),
                   const SizedBox(height: 24),
@@ -409,9 +411,35 @@ class _AuthViewState extends State<AuthView> {
                       child: const Text('Use another email'),
                     ),
                   ] else ...[
+                    OutlinedButton.icon(
+                      key: const Key('sign-in-with-google'),
+                      onPressed: openingGoogle
+                          ? null
+                          : controller.signInWithGoogle,
+                      icon: const _GoogleMark(),
+                      label: Text(
+                        openingGoogle
+                            ? 'Opening Google'
+                            : 'Continue with Google',
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        const Expanded(child: Divider(height: 1)),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Text(
+                            'or',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                        const Expanded(child: Divider(height: 1)),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
                     TextField(
                       controller: _emailController,
-                      autofocus: true,
                       keyboardType: TextInputType.emailAddress,
                       textInputAction: TextInputAction.done,
                       autofillHints: const [AutofillHints.email],
@@ -454,6 +482,52 @@ class _AuthViewState extends State<AuthView> {
       ),
     );
   }
+}
+
+class _GoogleMark extends StatelessWidget {
+  const _GoogleMark();
+
+  @override
+  Widget build(BuildContext context) {
+    // Google's brand guidelines ask for the four-colour G, drawn rather than
+    // shipped as an asset so it stays crisp and adds no bundle weight.
+    return const SizedBox.square(
+      dimension: 18,
+      child: CustomPaint(painter: _GoogleMarkPainter()),
+    );
+  }
+}
+
+class _GoogleMarkPainter extends CustomPainter {
+  const _GoogleMarkPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stroke = size.width * 0.19;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round;
+    final rect = Rect.fromLTWH(
+      stroke / 2,
+      stroke / 2,
+      size.width - stroke,
+      size.height - stroke,
+    );
+    const start = -math.pi / 2;
+    void arc(Color color, double from, double to) {
+      paint.color = color;
+      canvas.drawArc(rect, from, to - from, false, paint);
+    }
+
+    arc(const Color(0xFFEA4335), start, start + math.pi * 0.5);
+    arc(const Color(0xFF4285F4), start + math.pi * 0.5, start + math.pi);
+    arc(const Color(0xFF34A853), start + math.pi, start + math.pi * 1.5);
+    arc(const Color(0xFFFBBC05), start + math.pi * 1.5, start + math.pi * 2);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _ButtonProgress extends StatelessWidget {
