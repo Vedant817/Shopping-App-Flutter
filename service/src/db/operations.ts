@@ -198,8 +198,28 @@ export async function markWorkspaceUninstalled(db: Database, workspaceId: string
   });
 }
 
-export async function purgeWorkspaceData(db: Database, workspaceId: string): Promise<void> {
-  await db.transaction(async (tx) => {
+/**
+ * Removes OAuth state rows that can no longer be redeemed.
+ *
+ * A state row is only useful until it expires, and it holds the encrypted PKCE
+ * verifier, so an abandoned install attempt would otherwise leave that secret
+ * sitting in the table forever. Every install attempt writes one row, so a
+ * merchant who abandons several consent screens grows the table without bound.
+ * Consumed rows are removed on the same schedule once they can no longer be
+ * replayed.
+ *
+ * Returns the number of rows deleted so callers can log when the sweep bites.
+ */
+export async function purgeExpiredOauthStates(db: Database, now: Date = new Date()): Promise<number> {
+  const result = await db.execute(sql`
+    delete from oauth_states
+    where expires_at <= ${now}
+       or (consumed_at is not null and consumed_at <= ${now})
+  `);
+  return result.rowCount ?? 0;
+}
+
+export async function purgeWorkspaceData(db: Database, workspaceId: string): Promise<void> {  await db.transaction(async (tx) => {
     await tx.execute(sql`delete from cart_lines where workspace_id = ${workspaceId}`);
     await tx.execute(sql`delete from carts where workspace_id = ${workspaceId}`);
     await tx.execute(sql`delete from checkouts where workspace_id = ${workspaceId}`);

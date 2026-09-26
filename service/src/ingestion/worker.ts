@@ -6,9 +6,13 @@ import { upsertCustomer, upsertOrder, upsertProduct, upsertRefund } from '../db/
 import { acceptCustomEvent, processWebhookJob } from './webhooks.js';
 import { claimNextJob, completeJob, failJob, failJobResource, getJobResourceStates, initializeJobResources, markJobResourcesDead, startJobResource, completeJobResource, recoverStaleJobs, type IngestionJob } from './queue.js';
 import { failStaleSyncRuns, readSyncCursor, runSyncResource, type SyncResource } from '../shopify/sync.js';
+import { purgeExpiredOauthStates } from '../db/operations.js';
 
 
 type WorkerMetrics = { processedJobs: number; failedJobs: number; retryCount: number };
+
+/** How often the OAuth state sweep runs. The poll interval is far shorter. */
+const OAUTH_STATE_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 
 export type WorkerHandle = {
   stop: () => void;
@@ -22,12 +26,22 @@ export function startWorker(db: Database, config: AppConfig): WorkerHandle {
   let resolveDone: () => void = () => undefined;
   const done = new Promise<void>((resolve) => { resolveDone = resolve; });
   const metrics: WorkerMetrics = { processedJobs: 0, failedJobs: 0, retryCount: 0 };
+  let lastOauthSweep = 0;
+  const sweepOauthStates = async (now: number): Promise<void> => {
+    if (now - lastOauthSweep < OAUTH_STATE_SWEEP_INTERVAL_MS) return;
+    lastOauthSweep = now;
+    const deleted = await purgeExpiredOauthStates(db, new Date(now));
+    if (deleted > 0) {
+      process.stdout.write(`purged ${deleted} expired OAuth state row(s)\n`);
+    }
+  };
   const loop = async (): Promise<void> => {
     await heartbeat(db, workerId, metrics, config.ingestionPollIntervalMs);
     while (!stopping) {
       try {
         await recoverStaleJobs(db, config.ingestionStaleLockSeconds);
         await failStaleSyncRuns(db, Math.max(config.ingestionStaleLockSeconds * 10, 3600));
+        await sweepOauthStates(Date.now());
         let processed = 0;
         while (!stopping && processed < config.ingestionBatchSize) {
           const job = await claimNextJob(db, { workerId, staleLockSeconds: config.ingestionStaleLockSeconds });
