@@ -934,7 +934,11 @@ class CheckoutPageDto {
       ).map(CheckoutDto.fromJson).toList(growable: false),
       nextCursor: _nullableString(json, 'nextCursor'),
       recoveredValue: _decimal(json, 'recoveredValue'),
-      currencyCode: _string(json, 'currencyCode'),
+      // A page with no abandoned checkouts has no currency to report, so the
+      // service sends an empty string rather than inventing one. _string
+      // rejects empty values, which is the right guard for a row's own fields
+      // but wrong for an optional page-level total.
+      currencyCode: _nullableString(json, 'currencyCode') ?? '',
     );
   }
 
