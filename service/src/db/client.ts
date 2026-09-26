@@ -5,6 +5,17 @@ import { Pool } from 'pg';
 import * as schema from './schema.js';
 
 export function readDatabaseCaCertificate(): string | undefined {
+  // The inline form is checked first because it is the only one that works in the
+  // deployed container. The image copies package files, drizzle and src, and
+  // nothing else, so a certificate sitting on the host or in the repository can
+  // never appear under the working directory. Pasting the PEM into an
+  // environment variable sidesteps the image entirely.
+  const inline = process.env.DATABASE_CA_CERT;
+  if (inline && inline.trim().length > 0) {
+    // Dashboards and .env parsers both mangle multi-line values, so accept a
+    // certificate that arrived with its newlines escaped.
+    return inline.includes('\\n') ? inline.replace(/\\n/g, '\n') : inline;
+  }
   const path = process.env.DATABASE_CA_CERT_PATH;
   if (!path) return undefined;
   return readFileSync(resolve(process.cwd(), path), 'utf8');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { databasePoolConfig } from '../src/db/client.js';
+import { databasePoolConfig, readDatabaseCaCertificate } from '../src/db/client.js';
 import { loadConfig } from '../src/config/env.js';
 
 describe('database TLS policy', () => {
@@ -62,5 +62,47 @@ describe('database TLS policy', () => {
       TRUST_PROXY: 'false',
     };
     expect(() => loadConfig(env)).toThrow(/DATABASE_SSL/);
+  });
+
+  it('prefers an inline certificate over a file path', () => {
+    // The deployed image contains only package files, drizzle and src, so a
+    // certificate on disk is unreachable there. The inline form is the only one
+    // that can work in the container, so it has to win when both are set.
+    const previous = { inline: process.env.DATABASE_CA_CERT, path: process.env.DATABASE_CA_CERT_PATH };
+    try {
+      process.env.DATABASE_CA_CERT = 'INLINE-PEM';
+      process.env.DATABASE_CA_CERT_PATH = 'does-not-exist.pem';
+      expect(readDatabaseCaCertificate()).toBe('INLINE-PEM');
+    } finally {
+      if (previous.inline === undefined) delete process.env.DATABASE_CA_CERT;
+      else process.env.DATABASE_CA_CERT = previous.inline;
+      if (previous.path === undefined) delete process.env.DATABASE_CA_CERT_PATH;
+      else process.env.DATABASE_CA_CERT_PATH = previous.path;
+    }
+  });
+
+  it('restores newlines that a dashboard escaped', () => {
+    const previous = process.env.DATABASE_CA_CERT;
+    const previousPath = process.env.DATABASE_CA_CERT_PATH;
+    try {
+      delete process.env.DATABASE_CA_CERT_PATH;
+      process.env.DATABASE_CA_CERT = '-----BEGIN CERTIFICATE-----\\nQUJD\\n-----END CERTIFICATE-----';
+      expect(readDatabaseCaCertificate()).toBe('-----BEGIN CERTIFICATE-----\nQUJD\n-----END CERTIFICATE-----');
+    } finally {
+      if (previous === undefined) delete process.env.DATABASE_CA_CERT;
+      else process.env.DATABASE_CA_CERT = previous;
+      if (previousPath !== undefined) process.env.DATABASE_CA_CERT_PATH = previousPath;
+    }
+  });
+
+  it('ignores an empty certificate and falls back to the file path', () => {
+    const previous = process.env.DATABASE_CA_CERT;
+    try {
+      process.env.DATABASE_CA_CERT = '   ';
+      expect(readDatabaseCaCertificate()).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.DATABASE_CA_CERT;
+      else process.env.DATABASE_CA_CERT = previous;
+    }
   });
 });
