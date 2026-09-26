@@ -1,0 +1,91 @@
+name: CI
+
+# Every claim this repository makes about being correct is checked by a command
+# in package.json or pubspec.yaml. Until now nothing ran them automatically, so
+# a change could pass a developer's machine and still ship a broken migration, a
+# route that emits invalid SQL, or a client contract that no longer matches the
+# API. This workflow is the floor, not the goal: it proves the same checks a
+# developer runs locally still pass on a clean machine.
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  service:
+    name: Service (typecheck, tests, build, migrations, real HTTP smoke)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: service/package-lock.json
+
+      # The suite is worthless against a stale tree, and a failed install here
+      # would otherwise surface as a confusing test failure.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Migration mirrors match
+        run: npm run migrations:check
+
+      # Starts the compiled service against a real PostgreSQL container and
+      # drives it over HTTP with real signed JWTs and real webhook HMACs. This
+      # is the check that catches defects no unit test can, because every unit
+      # test stubs the database and therefore never generates SQL.
+      - name: Containerised database and HTTP smoke test
+        run: npm run test:docker
+
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+
+  flutter:
+    name: Flutter (format, analyze, tests, web release build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Formatting
+        run: dart format --output=none --set-exit-if-changed lib test
+
+      - name: Analyze
+        run: flutter analyze
+
+      # test/live_api_test.dart skips itself without credentials, so this stays
+      # hermetic. It runs against the deployed API in `npm run verify:live`.
+      - name: Tests
+        run: flutter test
+
+      - name: Web release build
+        run: flutter build web --release
