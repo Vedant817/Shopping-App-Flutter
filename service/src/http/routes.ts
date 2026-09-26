@@ -12,6 +12,7 @@ import { createShopifyAuthorization, postInstallReturnUrl } from '../shopify/ins
 import { exchangeAuthorizationCode, verifyOAuthCallback, type OAuthQuery } from '../shopify/oauth.js';
 import { ShopifyGraphqlClient } from '../shopify/graphql-client.js';
 import { fetchShopProfile } from '../shopify/profile.js';
+import { registerAppWebhooks, webhookCallbackUrl } from '../shopify/webhook-registration.js';
 import { enqueueJob } from '../ingestion/queue.js';
 import { acceptWebhook } from '../ingestion/webhooks.js';
 import { getCustomerDetail, getOverview, getProductDetail, getWorkspaceDto, listCustomers, listOrders, listProducts, listWorkspaces } from '../api/queries.js';
@@ -29,7 +30,6 @@ export type RouteDependencies = {
 };
 
 const workspaceParams = z.object({ workspaceId: z.string().min(1).max(128) });
-const tenantParams = z.object({ tenantId: z.string().min(1).max(128) });
 const idParams = z.object({ workspaceId: z.string().min(1).max(128), id: z.string().min(1).max(256) });
 const rangeQuery = z.object({ from: z.string().optional(), to: z.string().optional(), preset: z.string().optional() });
 const listQuery = z.object({ limit: z.string().optional(), cursor: z.string().optional() });
@@ -153,6 +153,24 @@ export async function registerRoutes(app: FastifyInstance, dependencies: RouteDe
       });
       await ensureAppUser(db, state.userId);
       const membershipAdded = await addWorkspaceMember(db, workspaceId, state.userId, 'owner');
+      // Re-assert the full topic set on every install. Relying on the app
+      // config alone leaves the store on whatever topics it accepted at some
+      // earlier version, which is how a new order goes unnoticed.
+      const webhooks = await registerAppWebhooks(client, webhookCallbackUrl(config.appBaseUrl)).catch((error: unknown) => {
+        request.log.error({ err: error, shopDomain: callback.shopDomain }, 'shopify webhook registration failed');
+        return undefined;
+      });
+      if (webhooks) {
+        if (webhooks.registered.length || webhooks.alreadyPresent.length) {
+          request.log.info({ shopDomain: callback.shopDomain, registered: webhooks.registered, alreadyPresent: webhooks.alreadyPresent.length }, 'shopify webhook topics confirmed');
+        }
+        if (webhooks.awaitingApproval.length) {
+          request.log.warn({ shopDomain: callback.shopDomain, topics: webhooks.awaitingApproval }, 'shopify webhook topics need protected customer data approval');
+        }
+        if (webhooks.failed.length) {
+          request.log.warn({ shopDomain: callback.shopDomain, failed: webhooks.failed }, 'some shopify webhook topics were rejected');
+        }
+      }
       await recordAuditEvent(db, { workspaceId, actorUserId: state.userId, action: membershipAdded ? 'shopify.installed' : 'shopify.reinstalled', resourceType: 'workspace', resourceId: workspaceId, metadata: { shopDomain: callback.shopDomain, apiVersion: config.shopifyApiVersion, membershipAdded } });
       await enqueueJob(db, { workspaceId, resource: 'full_sync', idempotencyKey: `install:${workspaceId}:${randomUUID()}`, maxAttempts: config.ingestionMaxAttempts, payload: { resources: ['products', 'customers', 'orders', 'abandoned_checkouts'] } });
       if (acceptsJson(request)) {
@@ -349,109 +367,6 @@ export async function registerRoutes(app: FastifyInstance, dependencies: RouteDe
     return reply.code(result.inserted ? 202 : 200).send({ eventId: body.id, status: result.job.status, duplicate: !result.inserted });
   });
 
-  app.get('/v1/tenants', async (request) => {
-    const user = requireAuth(request);
-    await ensureAppUser(db, user.id, user.email);
-    return { items: await listWorkspaces(db, user.id) };
-  });
-
-  app.get('/v1/tenants/:tenantId', async (request) => {
-    const { tenantId } = tenantParams.parse(request.params);
-    const user = requireAuth(request);
-    await requireWorkspaceMembership(db, user.id, tenantId);
-    const workspace = await getWorkspaceDto(db, tenantId, user.id);
-    if (!workspace) throw notFound('Workspace was not found');
-    return workspace;
-  });
-
-  app.get('/v1/tenants/:tenantId/summary', async (request) => {
-    const { tenantId } = tenantParams.parse(request.params);
-    const user = requireAuth(request);
-    await requireWorkspaceMembership(db, user.id, tenantId);
-    const overview = await getOverview(db, tenantId, parseRange(request.query), clock(), user.id);
-    if (!overview) throw notFound('Workspace was not found');
-    return overview;
-  });
-
-  app.get('/v1/tenants/:tenantId/revenue', async (request) => {
-    const { tenantId } = tenantParams.parse(request.params);
-    const user = requireAuth(request);
-    await requireWorkspaceMembership(db, user.id, tenantId);
-    const overview = await getOverview(db, tenantId, parseRange(request.query), clock(), user.id);
-    if (!overview) throw notFound('Workspace was not found');
-     return { range: overview.range, generatedAt: overview.generatedAt, currencyCode: overview.currencyCode, metricBasis: overview.metricBasis, trend: overview.trend };
-  });
-
-  app.get('/v1/tenants/:tenantId/products', async (request) => {
-    const { tenantId } = tenantParams.parse(request.params);
-    await requireWorkspaceMembership(db, requireAuth(request).id, tenantId);
-    const query = productListQuery.parse(request.query);
-    const pagination = parsePagination(query);
-    return listProducts(db, tenantId, pagination.limit, pagination.cursor, { search: query.q, category: query.category });
-  });
-
-  app.get('/v1/tenants/:tenantId/products/:id', async (request) => {
-    const { tenantId } = tenantParams.parse(request.params);
-    const { id } = z.object({ id: z.string().min(1).max(256) }).parse(request.params);
-    const user = requireAuth(request);
-    await requireWorkspaceMembership(db, user.id, tenantId);
-    const detail = await getProductDetail(db, tenantId, id, parseRange(request.query), user.id);
-    if (!detail) throw notFound('Product was not found');
-    return detail;
-  });
-
-  app.get('/v1/tenants/:tenantId/orders', async (request) => {
-    const { tenantId } = tenantParams.parse(request.params);
-    await requireWorkspaceMembership(db, requireAuth(request).id, tenantId);
-    const range = parseRange(request.query);
-    const query = orderListQuery.parse(request.query);
-    const pagination = parsePagination(query);
-    return listOrders(db, tenantId, range, pagination.limit, pagination.cursor, query.customerId, query.includeCancelled);
-  });
-
-  app.get('/v1/tenants/:tenantId/customers', async (request) => {
-    const { tenantId } = tenantParams.parse(request.params);
-    await requireWorkspaceMembership(db, requireAuth(request).id, tenantId);
-    const range = parseRange(request.query);
-    const query = customerListQuery.parse(request.query);
-    const pagination = parsePagination(query);
-    return listCustomers(db, tenantId, range, pagination.limit, pagination.cursor, query.q);
-  });
-
-  app.get('/v1/tenants/:tenantId/customers/:id', async (request) => {
-    const { tenantId } = tenantParams.parse(request.params);
-    const { id } = z.object({ id: z.string().min(1).max(256) }).parse(request.params);
-    const user = requireAuth(request);
-    await requireWorkspaceMembership(db, user.id, tenantId);
-    const detail = await getCustomerDetail(db, tenantId, id, parseRange(request.query), user.id, z.object({ includeCancelled: optionalBooleanQuery }).parse(request.query).includeCancelled);
-    if (!detail) throw notFound('Customer was not found');
-    return detail;
-  });
-
-  app.get('/v1/tenants/:tenantId/jobs/:jobId', async (request) => {
-    const { tenantId, jobId } = z.object({ tenantId: z.string().min(1).max(128), jobId: z.string().uuid() }).parse(request.params);
-    await requireWorkspaceMembership(db, requireAuth(request).id, tenantId);
-    const job = await getIngestionJob(db, tenantId, jobId);
-    if (!job) throw notFound('Ingestion job was not found');
-    return job;
-  });
-
-  app.get('/v1/tenants/:tenantId/sync-runs', async (request) => {
-    const { tenantId } = tenantParams.parse(request.params);
-    await requireWorkspaceMembership(db, requireAuth(request).id, tenantId);
-    return getSyncStatus(db, tenantId);
-  });
-
-  app.post('/v1/tenants/:tenantId/sync-runs', async (request, reply) => {
-    const { tenantId } = tenantParams.parse(request.params);
-    const user = requireAuth(request);
-    await requireWorkspaceMembership(db, user.id, tenantId, ['owner', 'admin']);
-    const body = syncBody.parse(request.body ?? {});
-    const resources = body.resources ?? ['products', 'customers', 'orders', 'abandoned_checkouts'];
-    const result = await enqueueJob(db, { workspaceId: tenantId, resource: 'full_sync', idempotencyKey: idempotencyKey(request, `manual-sync:${tenantId}`), maxAttempts: config.ingestionMaxAttempts, payload: { resources } });
-    await recordAuditEvent(db, { workspaceId: tenantId, actorUserId: user.id, action: 'sync.enqueued', resourceType: 'ingestion_job', resourceId: result.job.id, metadata: { resources }, requestId: request.id });
-    return reply.code(result.inserted ? 202 : 200).send({ jobId: result.job.id, status: result.job.status, duplicate: !result.inserted });
-  });
 }
 
 async function assertMembershipRoleAllowed(actorId: string, workspaceId: string, targetRole: string, db: Database): Promise<void> {
