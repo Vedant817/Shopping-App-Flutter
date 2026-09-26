@@ -11,3 +11,9 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+# PKCS12 is the format keytool recommends and the one Gradle handles most
+# reliably, and its conventional extension is .p12. Without this line a release
+# keystore using that extension is not ignored and lands in the repository on the
+# next `git add -A`, which is the one mistake that cannot be undone: Play Store
+# will not accept a replacement signing key for an existing app.
+**/*.p12
