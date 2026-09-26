@@ -258,6 +258,27 @@ node scripts/baseline-migrations.mjs 0004_role_constraint_snapshot
 node dist/migrate.js
 ```
 
+## Verifying a deployed stack
+
+Local tests stub the database and the network, so they cannot prove that the deployed API, the Supabase roles, or Shopify's webhook signing behave as assumed. Two harnesses cover that gap, and both read credentials from the ignored `service/.env` rather than accepting them as arguments.
+
+`npm run verify:live` drives the live service over HTTPS and then asserts the resulting database state. It posts a correctly base64-signed `products/update` webhook, replays the same webhook id to prove deduplication, proves a wrong secret and a hex digest are both refused, proves an unsupported topic is refused, waits for the worker to record the event and complete the ingestion job, and then switches PostgreSQL roles to confirm that `anon` and `authenticated` cannot read the encrypted access or refresh token columns or the `workspaces` table while `service_role` still can. It finishes by checking the worker heartbeat is recent. It exits non-zero and names the failing checks.
+
+```bash
+cd service
+npm run verify:live
+```
+
+`test/live_api_test.dart` exercises the real `HttpCommerceRepository` and every DTO in `lib/core/models.dart` against the deployed API using a real Supabase password session, so a wire-contract drift breaks a test instead of the app. It skips itself when the environment is absent, which keeps `flutter test` hermetic:
+
+```bash
+flutter test test/live_api_test.dart
+```
+
+`npm run inspect:live` prints the synced row counts per workspace and `npm run inspect:live-jobs` lists any failed or dead ingestion jobs with their last error. Together with `npm run serve:web`, which serves `build/web` on loopback for exercising a release build in a browser, these cover the remaining diagnostic work without any mock data.
+
+`scripts/serve-dev-session.mjs` exists for one narrow case: when the Supabase project's built-in email provider is rate limited, the OTP-only client cannot complete sign-in from a browser. It serves a single loopback route that performs the password grant and returns the session, so the authenticated UI can still be exercised during development. It binds to `127.0.0.1`, never logs the token, and is not used by the service or the worker.
+
 ## Live verification checklist
 
 Do not treat local tests as proof that external integrations work. After credentials and infrastructure exist, verify in this order:
@@ -271,4 +292,4 @@ Do not treat local tests as proof that external integrations work. After credent
 7. App uninstall, privacy request, redaction, and shop redact handling.
 8. Release-signed Android artifact and, on macOS, an iOS archive.
 
-The repository has passed local Flutter, service, migration, and Android/web build checks. Live Shopify, Supabase email, Render, webhook, and store verification remain pending until those external resources are configured.
+The repository passes Flutter, service, migration, and Android/web build checks locally, and the deployed stack has been verified against the real development store: OAuth install with PKCE, token refresh columns, a full sync, a signed webhook with canonical refetch and deduplication, role enforcement, and the client DTO contract. Remaining gaps are external rather than code: Supabase email OTP delivery is rate limited until custom SMTP is configured, the store has no customers or orders yet, and strict database TLS needs the Supabase root certificate.
