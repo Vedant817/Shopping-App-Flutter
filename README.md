@@ -85,7 +85,15 @@ threadline://shopify/install
 https://<render-service-host>/v1/webhooks/shopify
 ```
 
-Register the webhook topics accepted by the service, including the relevant product topics. Customer, order, refund, privacy, and event topics require Shopify protected-customer-data approval before they can be deployed. Abandoned checkout data is collected through the Admin `abandonedCheckouts` query rather than unsupported Admin cart/checkout roots.
+Register the webhook topics accepted by the service. Abandoned checkout data is collected through the Admin `abandonedCheckouts` query rather than unsupported Admin cart/checkout roots.
+
+Webhook topics reach a store in two different ways, and the distinction decides whether a new order shows up at all:
+
+- **Operational topics** (`app/uninstalled`, `products/*`, `customers/delete`) are registered through the Admin API by the install callback, in `src/shopify/webhook-registration.ts`, and re-asserted on every reinstall. They take effect immediately and the callback logs what it registered.
+- **Protected-data topics** (`orders/*`, `customers/create`, `customers/update`, `refunds/create`) are refused by Shopify until the app is approved for protected customer data. The callback reports these separately as `awaitingApproval` rather than as failures, because they are a Partner review rather than a defect. Once approval lands, the next install registers them with no code change.
+- **Compliance topics** (`customers/data_request`, `customers/redact`, `privacy/delete`, `shop/redact`) were removed from the Admin API's `WebhookSubscriptionTopic` enum in API 2026-07, so no mutation can create them. They exist only as an app-config declaration in `shopify.app.toml` and take effect when a new app version is released.
+
+Relying on `shopify.app.toml` alone is what lets an app pass every test and still never hear about a new order: a config change only reaches a store when a new version is released and the merchant accepts it, so the store keeps whatever topics it was installed with.
 
 The first successful Shopify install creates the workspace and assigns the installing Supabase user as owner. Additional members must already have a Supabase account; the member page adds an existing user by user ID.
 
@@ -244,7 +252,9 @@ The service refuses to start on an invalid environment. `SHOPIFY_OAUTH_CALLBACK_
 
 Use the **session pooler** connection string, not the direct one. Direct connections are IPv6-only unless the project has the IPv4 add-on, and Render cannot reach them. Copy the host from the dashboard's Connect dialog rather than composing it from the region, because a region can have more than one pooler cluster.
 
-Supabase's proxies present a chain rooted in the "Supabase Root 2021 CA", which is not in the public trust store, and the server does not send that root. Verifying it therefore fails unless you download the root certificate from **Supabase Dashboard → Settings → Database → Download Certificate**, save it into `service/`, and set `DATABASE_CA_CERT_PATH` to its filename.
+Supabase's proxies present a chain rooted in the "Supabase Root 2021 CA", which is not in the public trust store, and the server does not send that root. Verifying it therefore fails unless you download the root certificate from **Supabase Dashboard → Settings → Database → SSL Configuration**, save it into `service/`, and set `DATABASE_CA_CERT_PATH` to its filename.
+
+That certificate is only distributed through the dashboard; there is no public download URL for it, so this step cannot be automated. Until it is done the connection is encrypted but unauthenticated, which is the `sslmode=require` behaviour described above and is the weaker of the two modes that still encrypt.
 
 With no certificate configured the service connects with encryption but without server authentication, which is exactly `sslmode=require` — the mode Supabase documents as the default. The service logs a warning at startup whenever TLS is on and no certificate is configured, so the weaker mode is never silent.
 

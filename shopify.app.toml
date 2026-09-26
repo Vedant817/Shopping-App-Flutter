@@ -21,6 +21,19 @@ topics = [
   "products/create",
   "products/update",
   "products/delete",
+  "customers/create",
+  "customers/update",
+  "customers/delete",
+  "orders/create",
+  "orders/updated",
+  "orders/cancelled",
+  "orders/fulfilled",
+  "orders/paid",
+  "refunds/create",
+  "customers/data_request",
+  "customers/redact",
+  "privacy/delete",
+  "shop/redact",
 ]
 uri = "/v1/webhooks/shopify"
 
